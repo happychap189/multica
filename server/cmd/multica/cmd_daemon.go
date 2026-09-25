@@ -507,7 +507,11 @@ func requireKnownProfile(profile string) error {
 	if profile == "" {
 		return nil
 	}
-	if strings.HasPrefix(profile, "desktop-") {
+	// Case-insensitive on purpose: the desktop app lowercases hostnames when
+	// deriving profile dirs, and on case-insensitive filesystems (APFS
+	// default) "Desktop-localhost" resolves to the same directory as the
+	// app's own "desktop-localhost".
+	if strings.HasPrefix(strings.ToLower(profile), "desktop-") {
 		return fmt.Errorf("profile %q: profiles starting with 'desktop-' are managed by the Multica desktop app; use the app to control that daemon", profile)
 	}
 	exists, err := profileExists(profile)
@@ -569,6 +573,14 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 func runDaemonBackground(cmd *cobra.Command) error {
 	profile, err := resolveProfile(cmd)
 	if err != nil {
+		return err
+	}
+	// The start path carries the same desktop- ownership guard as the other
+	// lifecycle commands: with the app's daemon down, `daemon start --profile
+	// desktop-x` would otherwise pass requireDaemonAuth on the desktop
+	// profile's own stored PAT and squat the app's derived health port, which
+	// the app cannot distinguish from its own daemon.
+	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
 	healthPort := healthPortForProfile(profile)
@@ -938,6 +950,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	profile, err := resolveProfile(cmd)
 	if err != nil {
+		return err
+	}
+	// Same desktop- ownership guard as the background start path above.
+	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
 

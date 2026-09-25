@@ -52,7 +52,10 @@ func validateSelectedProfile(name, source string) error {
 	if err := validateProfileNameFormat(name, source); err != nil {
 		return err
 	}
-	if strings.HasPrefix(name, "desktop-") {
+	// Case-insensitive on purpose: on case-insensitive filesystems (APFS
+	// default) "Desktop-x" resolves to the same directory as the desktop
+	// app's own "desktop-x", so case must not bypass the ownership boundary.
+	if strings.HasPrefix(strings.ToLower(name), "desktop-") {
 		return fmt.Errorf("profile %q from %s: profiles starting with 'desktop-' are managed by the Multica desktop app; pass --profile explicitly if you really mean it", name, source)
 	}
 	exists, err := profileExists(name)

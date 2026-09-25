@@ -76,6 +76,16 @@ func TestValidateSelectedProfile(t *testing.T) {
 		}
 	})
 
+	t.Run("case-variant desktop- prefix rejected", func(t *testing.T) {
+		// On case-insensitive filesystems this path IS the desktop app's own
+		// directory; case must not bypass the ownership boundary.
+		mkProfiles(t, "desktop-localhost")
+		err := validateSelectedProfile("Desktop-localhost", "test source")
+		if err == nil || !strings.Contains(err.Error(), "managed by the Multica desktop app") {
+			t.Fatalf("err = %v, want desktop-ownership rejection", err)
+		}
+	})
+
 	t.Run("nested existing profile passes", func(t *testing.T) {
 		mkProfiles(t, "team/dev")
 		if err := validateSelectedProfile("team/dev", "test source"); err != nil {

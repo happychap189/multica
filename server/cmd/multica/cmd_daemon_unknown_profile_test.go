@@ -269,10 +269,11 @@ func TestDaemonStatusDefaultProfileNeverValidated(t *testing.T) {
 	}
 }
 
-// `daemon start` is deliberately NOT validated: creating a brand-new profile
-// still goes through the existing login flow, which needs to accept a name
-// that does not exist on disk yet.
-func TestDaemonStartAcceptsUnknownProfile(t *testing.T) {
+// `daemon start` requires the profile to exist. `multica login --profile
+// <name>` creates it, so the normal bootstrap (login first, then start) is
+// unaffected; a never-logged-in name fails with the actionable unknown-profile
+// error, which itself names `multica login --profile <name>` as the fix.
+func TestDaemonStartRequiresKnownProfile(t *testing.T) {
 	clearDaemonTaskEnv(t)
 	mkProfiles(t)
 
@@ -281,12 +282,11 @@ func TestDaemonStartAcceptsUnknownProfile(t *testing.T) {
 	err := runDaemonBackground(cmd)
 
 	var unknown *unknownProfileError
-	if errors.As(err, &unknown) {
-		t.Fatal("daemon start must not reject an unknown profile; it is how new profiles are created")
+	if !errors.As(err, &unknown) {
+		t.Fatalf("runDaemonBackground = %v, want *unknownProfileError", err)
 	}
-	// It fails for the pre-existing reason instead: nobody is logged in.
-	if err == nil || !strings.Contains(err.Error(), "not logged in") {
-		t.Fatalf("runDaemonBackground = %v, want the not-logged-in error", err)
+	if !strings.Contains(unknown.Error(), "multica login --profile brand-new-profile") {
+		t.Fatalf("error %q should point at the login fix", unknown.Error())
 	}
 }
 
@@ -349,16 +349,19 @@ func TestDaemonStatusTaskContextRejectsProfileBeforeListing(t *testing.T) {
 // TestDaemonLifecycleCommandsRejectDesktopProfiles covers AC6: desktop-
 // prefixed names are hard-rejected for lifecycle commands even when the
 // profile EXISTS on disk — the rejection is the ownership boundary, not a
-// missing-directory error. `daemon start` is likewise routed: a CLI-spawned
-// daemon must not be started under a desktop-owned name.
+// missing-directory error. `start` (background and, through runDaemonStart,
+// foreground) and `status` are routed through the same guard, so a CLI-spawned
+// daemon can neither take over nor probe a desktop-owned name.
 func TestDaemonLifecycleCommandsRejectDesktopProfiles(t *testing.T) {
 	cases := []struct {
 		name string
 		run  func(*cobra.Command) error
 	}{
+		{"start", func(c *cobra.Command) error { return runDaemonBackground(c) }},
 		{"stop", func(c *cobra.Command) error { return runDaemonStop(c, nil) }},
 		{"restart", func(c *cobra.Command) error { return runDaemonRestart(c, nil) }},
 		{"logs", func(c *cobra.Command) error { return runDaemonLogs(c, nil) }},
+		{"status", func(c *cobra.Command) error { return runDaemonStatus(c, nil) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -394,5 +397,18 @@ func TestConfigShowWithDesktopProfileStillWorks(t *testing.T) {
 	}
 	if !strings.Contains(out, "Profile:      desktop-x") {
 		t.Fatalf("show output missing desktop profile header:\n%s", out)
+	}
+}
+
+// The desktop- prefix check is case-insensitive: on case-insensitive
+// filesystems (APFS default) "Desktop-localhost" resolves to the same
+// directory as the desktop app's own "desktop-localhost", so a case variant
+// must not bypass the ownership boundary.
+func TestRequireKnownProfileRejectsDesktopPrefixCaseInsensitively(t *testing.T) {
+	mkProfiles(t, "desktop-localhost")
+
+	err := requireKnownProfile("Desktop-localhost")
+	if err == nil || !strings.Contains(err.Error(), "managed by the Multica desktop app") {
+		t.Fatalf("requireKnownProfile = %v, want desktop-ownership rejection", err)
 	}
 }

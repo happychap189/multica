@@ -46,4 +46,29 @@ describe("createRendererWebPreferences", () => {
       createRendererWebPreferences(PRELOAD, "fr").additionalArguments,
     ).toEqual(["--multica-locale=fr"]);
   });
+
+  it("gives a non-default profile its own persistent partition", () => {
+    expect(
+      createRendererWebPreferences(PRELOAD, "en", [], "personal", "default")
+        .partition,
+    ).toBe("persist:multica-personal");
+  });
+
+  it("keeps the default profile on Electron's default session (zero migration)", () => {
+    expect(
+      createRendererWebPreferences(PRELOAD, "en", [], "default", "default")
+        .partition,
+    ).toBeUndefined();
+  });
+
+  it("partitions by designated default, not by the literal id", () => {
+    expect(
+      createRendererWebPreferences(PRELOAD, "en", [], "work", "work")
+        .partition,
+    ).toBeUndefined();
+    expect(
+      createRendererWebPreferences(PRELOAD, "en", [], "personal", "work")
+        .partition,
+    ).toBe("persist:multica-personal");
+  });
 });

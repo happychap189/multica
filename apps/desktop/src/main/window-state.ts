@@ -32,8 +32,23 @@ export const MIN_WINDOW_HEIGHT = 600;
 
 export const WINDOW_STATE_FILENAME = "window-state.json";
 
-export function windowStateFilePath(userDataPath: string): string {
-  return join(userDataPath, WINDOW_STATE_FILENAME);
+/**
+ * Per-profile window-state path. The designated default profile keeps the
+ * legacy `window-state.json` name (zero migration: its saved geometry is what
+ * pre-multi-profile builds already wrote); any other profile gets its own
+ * `window-state-<profileId>.json`, which simply starts from default geometry
+ * when absent. `profileId`/`defaultProfileId` optional so a caller without a
+ * profile context keeps the legacy path.
+ */
+export function windowStateFilePath(
+  userDataPath: string,
+  profileId?: string,
+  defaultProfileId?: string,
+): string {
+  if (!profileId || profileId === defaultProfileId) {
+    return join(userDataPath, WINDOW_STATE_FILENAME);
+  }
+  return join(userDataPath, `window-state-${profileId}.json`);
 }
 
 /**

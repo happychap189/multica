@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -14,8 +14,17 @@ import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import { installOriginStrip } from "./origin-strip";
+import {
+  createWindowProfileRegistry,
+  resolveRuntimeConfigForProfile,
+} from "./window-profile-registry";
+import { loadDesktopConfig, type DesktopConfigResult } from "./runtime-config-loader";
+import {
+  DEFAULT_DESKTOP_CONFIG_REGISTRY,
+  type DesktopConfigRegistry,
+  type RuntimeConfigResult,
+} from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   sanitizeRendererRouteContext,
@@ -63,7 +72,7 @@ import {
 } from "./notification-gate";
 
 // Guards against registering the will-download handler more than once on the
-// same session. window.webContents.session is shared, and createWindow() can
+// same session. window.webContents.session is shared, and createMainWindow() can
 // be called again on macOS (app "activate" after all windows are closed).
 const downloadDialogSessions = new WeakSet<Electron.Session>();
 
@@ -83,7 +92,7 @@ function installDownloadSaveDialogHandler(window: BrowserWindow): void {
 // but Linux production needs an explicit BrowserWindow `icon` — AppImage
 // direct-launch doesn't register the .desktop entry, so GNOME has no path
 // from the running window to the hicolor icon and falls back to the
-// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// theme default. Consumed in createMainWindow() (all platforms in dev, Linux
 // in prod) and the macOS dev dock branch.
 //
 // `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
@@ -128,7 +137,16 @@ function freezeBreadcrumbPath(): string {
   return join(app.getPath("userData"), "last-client-failure.json");
 }
 
-let mainWindow: BrowserWindow | null = null;
+// Main windows by desktop.json profile id — the single source of truth for
+// which profile has a live main window. The pre-multi-profile single
+// `mainWindow` variable became a derived reference
+// (`mainWindows.get(configRegistry.defaultProfile)`) so single-profile
+// behavior is structurally identical to before.
+const mainWindows = new Map<string, BrowserWindow>();
+// webContents id → profile id for every Multica renderer (main + issue
+// windows). Registered before each window's loadRenderer() call so the
+// preload's synchronous `runtime-config:get` resolves on the first IPC.
+const windowProfiles = createWindowProfileRegistry();
 const issueWindows = new Set<BrowserWindow>();
 const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
   (window) => {
@@ -145,10 +163,34 @@ const rendererRouteContexts = new WeakMap<
   RendererRouteContext
 >();
 
-let runtimeConfigResult: RuntimeConfigResult = {
+// Profile registry from desktop.json, loaded during app ready. Held
+// separately from the load result so routing (Dock menu, window creation)
+// has a registry to read even while the load result is still the "not
+// loaded yet" placeholder.
+let configRegistry: DesktopConfigRegistry = DEFAULT_DESKTOP_CONFIG_REGISTRY;
+let desktopConfigResult: DesktopConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
 };
+
+// Derived reference: the default profile's main window.
+function defaultMainWindow(): BrowserWindow | null {
+  return mainWindows.get(configRegistry.defaultProfile) ?? null;
+}
+
+// Per-sender runtime config for the preload's synchronous boot call. Fail-
+// closed for unregistered senders: the renderer's blocking config-error UI,
+// never another profile's endpoints.
+function runtimeConfigForSender(sender: Electron.WebContents): RuntimeConfigResult {
+  const profileId = windowProfiles.lookup(sender.id);
+  if (!profileId) {
+    return resolveRuntimeConfigForProfile(configRegistry, undefined);
+  }
+  // A failed desktop.json load overrides everything: every window shows the
+  // blocking error, matching the pre-multi-profile behavior.
+  if (!desktopConfigResult.ok) return desktopConfigResult;
+  return resolveRuntimeConfigForProfile(configRegistry, profileId);
+}
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -156,7 +198,7 @@ function sendMainRendererMessage(
   channel: MainRendererMessageChannel,
   payload: unknown,
 ): void {
-  const window = mainWindow;
+  const window = defaultMainWindow();
   if (!window || window.isDestroyed()) return;
   window.webContents.send(channel, payload);
 }
@@ -169,8 +211,11 @@ function focusMainWindow(window: BrowserWindow): void {
 
 function ensureMainWindow(): BrowserWindow | null {
   if (!desktopInitialized || !app.isReady()) return null;
-  if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
-  return mainWindow;
+  const window = defaultMainWindow();
+  if (!window || window.isDestroyed()) {
+    return createMainWindow(configRegistry.defaultProfile);
+  }
+  return window;
 }
 
 function dispatchToMainRenderer(
@@ -280,7 +325,7 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
   });
 }
 
-function createWindow(): BrowserWindow {
+function createMainWindow(profileId: string): BrowserWindow {
   // Pass the OS-preferred language to the renderer via additionalArguments
   // instead of a sync IPC call. process.argv is available to the preload
   // script before the first network request, so the renderer's i18next
@@ -288,11 +333,22 @@ function createWindow(): BrowserWindow {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
-  mainRendererMessages.resetReady();
+  // Reset the shared main-renderer queue only for the default profile's
+  // window. The queue is still default-owned in this phase (per-profile
+  // queues land in Phase 2B); resetting it for other profiles would stall
+  // the default window's queued deep-link payloads — the renderer announces
+  // readiness once per listener install, not again after a reset.
+  if (profileId === configRegistry.defaultProfile) {
+    mainRendererMessages.resetReady();
+  }
 
   // Restore prior size/position/maximized/fullscreen (#5244), constraining
   // bounds to the work area of the display the window will land on.
-  const stateFile = windowStateFilePath(app.getPath("userData"));
+  const stateFile = windowStateFilePath(
+    app.getPath("userData"),
+    profileId,
+    configRegistry.defaultProfile,
+  );
   const savedWindowState = loadWindowState(stateFile);
   const windowOpts = resolveWindowOptions(
     savedWindowState,
@@ -300,7 +356,7 @@ function createWindow(): BrowserWindow {
     screen.getPrimaryDisplay().workArea,
   );
 
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: windowOpts.width,
     height: windowOpts.height,
     ...(windowOpts.x != null && windowOpts.y != null
@@ -323,9 +379,18 @@ function createWindow(): BrowserWindow {
     webPreferences: createRendererWebPreferences(
       join(__dirname, "../preload/index.js"),
       systemLocale,
+      [],
+      profileId,
+      configRegistry.defaultProfile,
     ),
   });
-  const window = mainWindow;
+
+  // Profile bookkeeping must land before loadRenderer(): the preload fires a
+  // synchronous `runtime-config:get` during load, and an unregistered sender
+  // is fail-closed (blocking error UI instead of a wrong server's endpoints).
+  const webContentsId = window.webContents.id;
+  windowProfiles.register(webContentsId, profileId);
+  mainWindows.set(profileId, window);
 
   // Persist bounds on resize/move (debounced) and on close so the next
   // launch restores size/position and max/fullscreen flags. getNormalBounds
@@ -347,21 +412,22 @@ function createWindow(): BrowserWindow {
   });
 
   window.on("closed", () => {
-    if (mainWindow === window) {
-      mainWindow = null;
-      mainRendererMessages.resetReady();
+    if (mainWindows.get(profileId) === window) {
+      mainWindows.delete(profileId);
+      // The shared queue stays default-owned in this phase (per-profile
+      // queues land in Phase 2B) — only the default window's close resets it.
+      if (profileId === configRegistry.defaultProfile) {
+        mainRendererMessages.resetReady();
+      }
     }
+    windowProfiles.unregister(webContentsId);
   });
 
-  // Strip Origin header from WebSocket upgrade requests so the server's
-  // origin whitelist doesn't reject connections from localhost dev origins.
-  window.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["wss://*/*", "ws://*/*"] },
-    (details, callback) => {
-      delete details.requestHeaders["Origin"];
-      callback({ requestHeaders: details.requestHeaders });
-    },
-  );
+  // Strip Origin from WebSocket upgrades on this window's session. Windows
+  // sharing a partition share one Session object — installOriginStrip is
+  // idempotent per session, so the main window and issue windows of one
+  // profile end up with exactly one listener.
+  installOriginStrip(window.webContents.session);
 
   window.on("ready-to-show", () => {
     // Restore max/fullscreen after normal bounds are applied.
@@ -459,7 +525,37 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
-function createIssueWindow(context: IssueWindowContext): void {
+// macOS Dock menu: a "New Window" submenu enumerating the desktop.json
+// profiles. Injected only when a non-default profile exists, so single-profile
+// users keep the stock Dock right-click menu. Clicking an entry focuses that
+// profile's main window, or creates it. No application menu is installed —
+// Electron's default menu keeps providing Copy/Paste/Quit roles.
+function installDockMenuIfNeeded(): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  const profileIds = Object.keys(configRegistry.profiles);
+  const hasNonDefault = profileIds.some((id) => id !== configRegistry.defaultProfile);
+  if (!hasNonDefault) return;
+  app.dock.setMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "New Window",
+        submenu: profileIds.map((profileId) => ({
+          label: profileId,
+          click: () => {
+            const existing = mainWindows.get(profileId);
+            if (existing && !existing.isDestroyed()) {
+              focusMainWindow(existing);
+              return;
+            }
+            createMainWindow(profileId);
+          },
+        })),
+      },
+    ]),
+  );
+}
+
+function createIssueWindow(profileId: string, context: IssueWindowContext): void {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
@@ -480,15 +576,28 @@ function createIssueWindow(context: IssueWindowContext): void {
       join(__dirname, "../preload/index.js"),
       systemLocale,
       [encodeIssueWindowArgument(context)],
+      profileId,
+      configRegistry.defaultProfile,
     ),
   });
+
+  // Profile bookkeeping before loadRenderer(), same contract as the main
+  // window: the preload's synchronous `runtime-config:get` needs the
+  // registration in place on its first IPC.
+  const webContentsId = window.webContents.id;
+  windowProfiles.register(webContentsId, profileId);
 
   issueWindows.add(window);
   authSessionCoordinator.registerIssueWindow(window);
   window.on("closed", () => {
     issueWindows.delete(window);
     authSessionCoordinator.unregisterIssueWindow(window);
+    windowProfiles.unregister(webContentsId);
   });
+
+  // Same per-session origin strip as the main window — an issue window in a
+  // non-default partition is a fresh Session with no strip of its own.
+  installOriginStrip(window.webContents.session);
 
   window.on("ready-to-show", () => window.show());
   installLocaleRefresh(window);
@@ -621,7 +730,7 @@ if (!gotTheLock) {
       readonly VITE_APP_URL?: string;
     };
 
-    runtimeConfigResult = await loadRuntimeConfig({
+    const loaded = await loadDesktopConfig({
       isDev: is.dev,
       // electron-vite exposes VITE_* on import.meta.env for the main process;
       // keep dev URL overrides on the same source the renderer used before
@@ -632,6 +741,9 @@ if (!gotTheLock) {
         appUrl: viteEnv.VITE_APP_URL,
       },
     });
+
+    desktopConfigResult = loaded;
+    if (loaded.ok) configRegistry = loaded.registry;
 
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
@@ -644,6 +756,8 @@ if (!gotTheLock) {
       const icon = nativeImage.createFromPath(BUNDLED_ICON_PATH);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
+
+    installDockMenuIfNeeded();
 
     app.on("browser-window-created", (_, window) => {
       optimizer.watchWindowShortcuts(window);
@@ -668,11 +782,18 @@ if (!gotTheLock) {
       if (!BrowserWindow.fromWebContents(event.sender)) {
         return { ok: false, reason: "invalid_request" } as const;
       }
+      // Sender must belong to a registered profile window; an unregistered
+      // sender gets no issue window (fail-closed, same contract as the
+      // runtime-config:get handler).
+      const profileId = windowProfiles.lookup(event.sender.id);
+      if (!profileId) {
+        return { ok: false, reason: "invalid_request" } as const;
+      }
       const context = parseIssueWindowRequest(request);
       if (!context) {
         return { ok: false, reason: "invalid_request" } as const;
       }
-      createIssueWindow(context);
+      createIssueWindow(profileId, context);
       return { ok: true } as const;
     });
 
@@ -716,7 +837,7 @@ if (!gotTheLock) {
     // boot. If desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
-      event.returnValue = runtimeConfigResult;
+      event.returnValue = runtimeConfigForSender(event.sender);
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
@@ -732,7 +853,8 @@ if (!gotTheLock) {
     ipcMain.on(
       MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
       (event, state: unknown) => {
-        if (!mainWindow || event.sender !== mainWindow.webContents) return;
+        const main = defaultMainWindow();
+        if (!main || event.sender !== main.webContents) return;
         const parsed = parseMainRendererChannelState(state);
         if (!parsed) return;
         mainRendererMessages.setReady(
@@ -750,7 +872,7 @@ if (!gotTheLock) {
       const userId = parseAuthSessionUserId(value);
       if (!sourceWindow || userId === undefined) return;
 
-      if (sourceWindow === mainWindow) {
+      if (sourceWindow === defaultMainWindow()) {
         const accountInvalidated = authSessionCoordinator.reportMain(userId);
         if (accountInvalidated) {
           authSessionGeneration += 1;
@@ -779,7 +901,7 @@ if (!gotTheLock) {
     ipcMain.on("notification:show", (event, value: unknown) => {
       const sourceWindow = BrowserWindow.fromWebContents(event.sender);
       if (!sourceWindow) return;
-      if (sourceWindow === mainWindow) {
+      if (sourceWindow === defaultMainWindow()) {
         if (!authSessionCoordinator.hasActiveMainSession()) return;
       } else if (
         !issueWindows.has(sourceWindow) ||
@@ -833,11 +955,11 @@ if (!gotTheLock) {
     });
 
     desktopInitialized = true;
-    createWindow();
+    createMainWindow(configRegistry.defaultProfile);
 
-    setupAutoUpdater(() => mainWindow);
-    setupDaemonManager(() => mainWindow);
-    setupLocalDirectory(() => mainWindow);
+    setupAutoUpdater(() => defaultMainWindow());
+    setupDaemonManager(() => defaultMainWindow());
+    setupLocalDirectory(() => defaultMainWindow());
 
     app.on("activate", () => {
       const window = ensureMainWindow();

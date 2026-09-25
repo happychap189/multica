@@ -12,14 +12,27 @@ import type { WebPreferences } from "electron";
  * `preloadPath` is injected rather than derived from `__dirname` here to keep
  * this a pure function — the bundled main process resolves it relative to its
  * own output directory at the call sites.
+ *
+ * `profileId` + `defaultProfileId` drive session partitioning: the designated
+ * default profile stays on Electron's default session (its cookies/login live
+ * there and must not migrate), every other profile gets an isolated persistent
+ * partition named after its validated id.
  */
 export function createRendererWebPreferences(
   preloadPath: string,
   systemLocale: string,
   additionalArguments: string[] = [],
+  profileId?: string,
+  defaultProfileId?: string,
 ): WebPreferences {
   return {
     preload: preloadPath,
+    // Multi-profile session isolation. The default profile deliberately keeps
+    // Electron's default session — zero migration for existing logins; a
+    // `persist:` partition for it would move its cookie store on disk.
+    ...(profileId && profileId !== defaultProfileId
+      ? { partition: `persist:multica-${profileId}` }
+      : {}),
     // Sandboxed preload. The preload script only uses sandbox-safe APIs: the
     // `electron` module (contextBridge, ipcRenderer — including sendSync) and
     // the polyfilled `process` (platform, argv). It therefore must remain a

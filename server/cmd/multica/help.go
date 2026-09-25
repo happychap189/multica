@@ -126,6 +126,7 @@ EXAMPLES
 ENVIRONMENT VARIABLES
   MULTICA_SERVER_URL    Override the default server URL
   MULTICA_WORKSPACE_ID  Set the active workspace
+  MULTICA_PROFILE       Default profile for bare commands when --profile is not passed; pin it with 'multica config set profile <name>'
 
 LEARN MORE
   Use ` + "`multica <command> <subcommand> --help`" + ` for more information about a command.

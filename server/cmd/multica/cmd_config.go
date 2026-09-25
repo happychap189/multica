@@ -32,6 +32,7 @@ var configSetSupportedKeys = []string{
 	"server_url",
 	"app_url",
 	"workspace_id",
+	"profile",
 	"device_name",
 	"runtime_name",
 	"workspaces_root",
@@ -51,7 +52,7 @@ var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a CLI configuration value",
 	Long: "Supported keys: " +
-		"server_url, app_url, workspace_id, " +
+		"server_url, app_url, workspace_id, profile, " +
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
 		"heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -70,7 +71,14 @@ var configSetCmd = &cobra.Command{
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
-		"value (e.g. `config set poll_interval \"\"`).",
+		"value (e.g. `config set poll_interval \"\"`). " +
+		"The profile key is different: it writes the machine-level " +
+		"current-profile pointer instead of config.json, so bare commands " +
+		"resolve it whenever --profile and MULTICA_PROFILE are unset. " +
+		"Pass an empty value to clear the pointer back to the default " +
+		"profile. The value must name an existing profile, and the key is " +
+		"rejected inside task-local config roots (it is machine-level " +
+		"state).",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -98,6 +106,20 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	if profile != "" {
 		fmt.Fprintf(os.Stdout, "Profile:      %s\n", profile)
 	}
+	// The pointer line renders the machine-level file verbatim rather than
+	// deriving it from the resolution chain, so a dangling pointer is visible
+	// for what it is; it is skipped in task contexts, where machine-level
+	// state is out of scope.
+	if !inDaemonManagedExecutionContext() && strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
+		pointerName, err := cli.ReadCurrentProfilePointer()
+		if err != nil {
+			return err
+		}
+		if pointerName == "" {
+			pointerName = "(not set)"
+		}
+		fmt.Fprintf(os.Stdout, "Profile pointer: %s\n", pointerName)
+	}
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "server_url:", valueOrDefault(cfg.ServerURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "app_url:", valueOrDefault(cfg.AppURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "workspace_id:", valueOrDefault(cfg.WorkspaceID, "(not set)"))
@@ -123,6 +145,14 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 	key, value := args[0], args[1]
 
+	// The profile key writes the machine-level pointer file, not config.json,
+	// and is handled before the resolution below so `config set profile` stays
+	// usable while the pointer is dangling — it is the pointer's own repair
+	// path. setProfilePointer bypasses the load/apply/save pipeline entirely.
+	if key == "profile" {
+		return setProfilePointer(value)
+	}
+
 	profile, err := resolveProfile(cmd)
 	if err != nil {
 		return err
@@ -145,6 +175,33 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		storedValue = cfg.WorkspacesRoot
 	}
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, storedValue)
+	return nil
+}
+
+// setProfilePointer implements the `profile` key of `config set`: an empty
+// value deletes the machine-level current-profile pointer, any other value
+// validates it exactly like the pointer layer of the resolution chain and
+// writes the pointer. config.json is never read or written here, and the
+// command must work while the pointer is dangling because it IS the pointer's
+// repair path.
+func setProfilePointer(value string) error {
+	if strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" {
+		return fmt.Errorf("profile pointer is a machine-level setting; not available inside task-local config roots")
+	}
+	if value == "" {
+		if err := cli.DeleteCurrentProfilePointer(); err != nil {
+			return fmt.Errorf("clear profile pointer: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Set profile = \n")
+		return nil
+	}
+	if err := validateSelectedProfile(value, "config set profile"); err != nil {
+		return err
+	}
+	if err := cli.WriteCurrentProfilePointer(value); err != nil {
+		return fmt.Errorf("write profile pointer: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Set profile = %s\n", value)
 	return nil
 }
 

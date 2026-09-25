@@ -19,6 +19,7 @@ import {
   createWindowProfileRegistry,
   resolveRuntimeConfigForProfile,
 } from "./window-profile-registry";
+import { resolveLastActiveProfileId } from "./last-active-profile";
 import { loadDesktopConfig, type DesktopConfigResult } from "./runtime-config-loader";
 import {
   DEFAULT_DESKTOP_CONFIG_REGISTRY,
@@ -148,16 +149,49 @@ const mainWindows = new Map<string, BrowserWindow>();
 // preload's synchronous `runtime-config:get` resolves on the first IPC.
 const windowProfiles = createWindowProfileRegistry();
 const issueWindows = new Set<BrowserWindow>();
-const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
-  (window) => {
-    issueWindows.delete(window);
-    if (!window.isDestroyed()) window.close();
-  },
-);
 const notificationGate = new NotificationGate();
-const mainRendererMessages = new MainRendererMessageQueue();
 let desktopInitialized = false;
-let authSessionGeneration = 0;
+
+// Most recently focused main-window profile; undefined until a main window
+// first gains focus. Consumed only through resolveLastActiveProfileId, which
+// falls back to the default profile when this is undefined or stale.
+let lastFocusedProfileId: string | undefined;
+
+// Per-profile main-process singletons. Every desktop.json profile owns one
+// entry, holding:
+// - its queued-message pipeline — deep links / chord relays wait for that
+//   profile's own main renderer readiness, never another profile's;
+// - its auth-session coordinator — issue windows bind to their own profile's
+//   account, so profile B's issue windows never close because profile A
+//   logged out or switched accounts;
+// - its auth-session generation counter — a notification click validates
+//   against the generation of the profile that showed it.
+// Single-profile installs hold exactly one entry, structurally identical to
+// the previous module-level singletons.
+interface ProfileRuntime {
+  messageQueue: MainRendererMessageQueue;
+  authCoordinator: AuthSessionCoordinator<BrowserWindow>;
+  authSessionGeneration: number;
+}
+
+const profileRuntimes = new Map<string, ProfileRuntime>();
+
+function profileRuntimeFor(profileId: string): ProfileRuntime {
+  let runtime = profileRuntimes.get(profileId);
+  if (!runtime) {
+    runtime = {
+      messageQueue: new MainRendererMessageQueue(),
+      authCoordinator: new AuthSessionCoordinator<BrowserWindow>((window) => {
+        issueWindows.delete(window);
+        if (!window.isDestroyed()) window.close();
+      }),
+      authSessionGeneration: 0,
+    };
+    profileRuntimes.set(profileId, runtime);
+  }
+  return runtime;
+}
+
 const rendererRouteContexts = new WeakMap<
   Electron.WebContents,
   RendererRouteContext
@@ -194,13 +228,14 @@ function runtimeConfigForSender(sender: Electron.WebContents): RuntimeConfigResu
 
 // --- Deep link helpers ---------------------------------------------------
 
-function sendMainRendererMessage(
-  channel: MainRendererMessageChannel,
-  payload: unknown,
-): void {
-  const window = defaultMainWindow();
-  if (!window || window.isDestroyed()) return;
-  window.webContents.send(channel, payload);
+// Sender bound to one profile's main window; consumed as the queue's delivery
+// function so a profile's queued payloads can only ever land in its own window.
+function sendToProfileWindow(profileId: string) {
+  return (channel: MainRendererMessageChannel, payload: unknown): void => {
+    const window = mainWindows.get(profileId);
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(channel, payload);
+  };
 }
 
 function focusMainWindow(window: BrowserWindow): void {
@@ -209,21 +244,39 @@ function focusMainWindow(window: BrowserWindow): void {
   window.focus();
 }
 
-function ensureMainWindow(): BrowserWindow | null {
+// Recreate a profile's main window when it is gone. Lifecycle paths that
+// carry no profile context (macOS activate, second-instance focus) target
+// the default profile.
+function ensureMainWindowFor(profileId: string): BrowserWindow | null {
   if (!desktopInitialized || !app.isReady()) return null;
-  const window = defaultMainWindow();
+  const window = mainWindows.get(profileId);
   if (!window || window.isDestroyed()) {
-    return createMainWindow(configRegistry.defaultProfile);
+    return createMainWindow(profileId);
   }
   return window;
 }
 
+// Deliver to one profile's main window, honoring that profile's own readiness
+// queue. An explicit profile (notification click, chord relay) targets its
+// owning window; profile-less dispatches (deep links) go to the last focused
+// profile's window, falling back to the default profile. Deep links gain
+// safer per-profile routing in Phase 4; until then this is the documented
+// interim target.
 function dispatchToMainRenderer(
   channel: MainRendererMessageChannel,
   payload: unknown,
+  profileId?: string,
 ): void {
-  mainRendererMessages.enqueue(channel, payload, sendMainRendererMessage);
-  const window = ensureMainWindow();
+  const targetProfile = resolveLastActiveProfileId(
+    configRegistry,
+    profileId ?? lastFocusedProfileId,
+  );
+  profileRuntimeFor(targetProfile).messageQueue.enqueue(
+    channel,
+    payload,
+    sendToProfileWindow(targetProfile),
+  );
+  const window = ensureMainWindowFor(targetProfile);
   if (window) focusMainWindow(window);
 }
 
@@ -309,16 +362,26 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
       window.webContents.send("tab:close-active");
     } else if (result === "open-settings") {
       event.preventDefault();
-      // Settings is a tab, so it can only live in the tabbed main window.
-      // Routing through the queue means the chord also works from a
-      // dedicated issue window — and from one that outlived the main window,
-      // which is recreated and only then handed the request.
-      dispatchToMainRenderer("settings:open", null);
+      // Settings is a tab, so it can only live in the tabbed main window of
+      // the chord source window's profile. Routing through that profile's
+      // queue means the chord also works from a dedicated issue window — and
+      // from one that outlived the main window, which is recreated and only
+      // then handed the request.
+      dispatchToMainRenderer(
+        "settings:open",
+        null,
+        windowProfiles.lookup(window.webContents.id),
+      );
     } else if (typeof result === "object" && result.action === "select-tab") {
       event.preventDefault();
-      // Product tabs only exist in the main window. Route there even when the
-      // chord came from a dedicated issue window, matching Settings behavior.
-      dispatchToMainRenderer(TAB_SELECTION_SHORTCUT_CHANNEL, result.key);
+      // Product tabs only exist in the chord source window's profile main
+      // window. Route there even when the chord came from a dedicated issue
+      // window, matching Settings behavior.
+      dispatchToMainRenderer(
+        TAB_SELECTION_SHORTCUT_CHANNEL,
+        result.key,
+        windowProfiles.lookup(window.webContents.id),
+      );
     } else if (result) {
       event.preventDefault();
     }
@@ -333,14 +396,12 @@ function createMainWindow(profileId: string): BrowserWindow {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
-  // Reset the shared main-renderer queue only for the default profile's
-  // window. The queue is still default-owned in this phase (per-profile
-  // queues land in Phase 2B); resetting it for other profiles would stall
-  // the default window's queued deep-link payloads — the renderer announces
-  // readiness once per listener install, not again after a reset.
-  if (profileId === configRegistry.defaultProfile) {
-    mainRendererMessages.resetReady();
-  }
+  // Reset this profile's queue readiness only: the renderer that announced
+  // readiness for it is being replaced, and the renderer announces readiness
+  // once per listener install, not again after a reset — so the recreated
+  // window re-announces, then drains anything still pending. Other profiles'
+  // queues keep their announced readiness.
+  profileRuntimeFor(profileId).messageQueue.resetReady();
 
   // Restore prior size/position/maximized/fullscreen (#5244), constraining
   // bounds to the work area of the display the window will land on.
@@ -414,11 +475,9 @@ function createMainWindow(profileId: string): BrowserWindow {
   window.on("closed", () => {
     if (mainWindows.get(profileId) === window) {
       mainWindows.delete(profileId);
-      // The shared queue stays default-owned in this phase (per-profile
-      // queues land in Phase 2B) — only the default window's close resets it.
-      if (profileId === configRegistry.defaultProfile) {
-        mainRendererMessages.resetReady();
-      }
+      // Only this profile's queue loses readiness; its pending payloads
+      // survive for the recreated window to drain. Other profiles untouched.
+      profileRuntimeFor(profileId).messageQueue.resetReady();
     }
     windowProfiles.unregister(webContentsId);
   });
@@ -440,6 +499,13 @@ function createMainWindow(profileId: string): BrowserWindow {
   });
 
   installLocaleRefresh(window);
+
+  // lastActiveProfileId tracking (2B.5): the most recently focused main
+  // window's profile steers profile-less dispatches (deep links). Main
+  // windows only — issue windows never change the answer.
+  window.on("focus", () => {
+    lastFocusedProfileId = profileId;
+  });
 
   installDownloadSaveDialogHandler(window);
 
@@ -588,10 +654,13 @@ function createIssueWindow(profileId: string, context: IssueWindowContext): void
   windowProfiles.register(webContentsId, profileId);
 
   issueWindows.add(window);
-  authSessionCoordinator.registerIssueWindow(window);
+  // Bind the issue window to its own profile's account: the profile-scoped
+  // coordinator closes it only on that profile's logout/account switch.
+  const runtime = profileRuntimeFor(profileId);
+  runtime.authCoordinator.registerIssueWindow(window);
   window.on("closed", () => {
     issueWindows.delete(window);
-    authSessionCoordinator.unregisterIssueWindow(window);
+    runtime.authCoordinator.unregisterIssueWindow(window);
     windowProfiles.unregister(webContentsId);
   });
 
@@ -707,7 +776,7 @@ if (!gotTheLock) {
 
   // Windows/Linux: second instance passes deep link via argv
   app.on("second-instance", (_event, argv) => {
-    const window = ensureMainWindow();
+    const window = ensureMainWindowFor(configRegistry.defaultProfile);
     if (window) focusMainWindow(window);
 
     // On Windows the deep link URL is the last argv entry
@@ -848,40 +917,49 @@ if (!gotTheLock) {
     });
 
     // Preload announces each listener only after it has been installed by the
-    // main renderer. Ignore issue-window senders so they can never drain a
-    // payload intended for the tabbed application window.
+    // main renderer. Readiness is scoped per profile: any profile's main
+    // window may register — into its own profile's queue — while issue
+    // windows, which load the same preload and would also announce, can
+    // never mark any queue ready.
     ipcMain.on(
       MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
       (event, state: unknown) => {
-        const main = defaultMainWindow();
-        if (!main || event.sender !== main.webContents) return;
+        const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+        const profileId = windowProfiles.lookup(event.sender.id);
+        if (!sourceWindow || !profileId) return;
+        if (mainWindows.get(profileId) !== sourceWindow) return;
         const parsed = parseMainRendererChannelState(state);
         if (!parsed) return;
-        mainRendererMessages.setReady(
+        profileRuntimeFor(profileId).messageQueue.setReady(
           parsed.channel,
           parsed.ready,
-          sendMainRendererMessage,
+          sendToProfileWindow(profileId),
         );
       },
     );
 
-    // Account identity is the only cross-renderer auth signal. Main remains
-    // authoritative and closes issue windows instead of copying credentials.
+    // Account identity is the only cross-renderer auth signal. Each profile's
+    // main window remains authoritative for its own issue windows — profile
+    // B's issue windows never close because profile A logged out or switched
+    // accounts. Tokens never cross renderer boundaries.
     ipcMain.on(AUTH_SESSION_STATE_CHANNEL, (event, value: unknown) => {
       const sourceWindow = BrowserWindow.fromWebContents(event.sender);
       const userId = parseAuthSessionUserId(value);
       if (!sourceWindow || userId === undefined) return;
+      const profileId = windowProfiles.lookup(event.sender.id);
+      if (!profileId) return;
 
-      if (sourceWindow === defaultMainWindow()) {
-        const accountInvalidated = authSessionCoordinator.reportMain(userId);
+      const runtime = profileRuntimeFor(profileId);
+      if (sourceWindow === mainWindows.get(profileId)) {
+        const accountInvalidated = runtime.authCoordinator.reportMain(userId);
         if (accountInvalidated) {
-          authSessionGeneration += 1;
-          mainRendererMessages.clear("inbox:open");
+          runtime.authSessionGeneration += 1;
+          runtime.messageQueue.clear("inbox:open");
         }
         return;
       }
       if (issueWindows.has(sourceWindow)) {
-        authSessionCoordinator.reportIssue(sourceWindow, userId);
+        runtime.authCoordinator.reportIssue(sourceWindow, userId);
       }
     });
 
@@ -901,17 +979,24 @@ if (!gotTheLock) {
     ipcMain.on("notification:show", (event, value: unknown) => {
       const sourceWindow = BrowserWindow.fromWebContents(event.sender);
       if (!sourceWindow) return;
-      if (sourceWindow === defaultMainWindow()) {
-        if (!authSessionCoordinator.hasActiveMainSession()) return;
+      const profileId = windowProfiles.lookup(event.sender.id);
+      if (!profileId) return;
+      const runtime = profileRuntimeFor(profileId);
+      if (sourceWindow === mainWindows.get(profileId)) {
+        if (!runtime.authCoordinator.hasActiveMainSession()) return;
       } else if (
         !issueWindows.has(sourceWindow) ||
-        !authSessionCoordinator.isCurrentIssueSession(sourceWindow)
+        !runtime.authCoordinator.isCurrentIssueSession(sourceWindow)
       ) {
         return;
       }
 
       const payload = parseNativeNotificationPayload(value);
       if (!payload || !Notification.isSupported()) return;
+      // The gate is intentionally process-global: cross-profile focus
+      // suppression (a focused window suppresses every profile's banner) and
+      // process-wide itemId dedupe read as one coherent notification stream —
+      // the user cannot tell profiles apart in Notification Center.
       const anyWindowFocused = BrowserWindow.getAllWindows().some(
         (window) => !window.isDestroyed() && window.isFocused(),
       );
@@ -923,18 +1008,29 @@ if (!gotTheLock) {
         title: payload.title,
         body: payload.body,
       });
-      const notificationSessionGeneration = authSessionGeneration;
+      // The click guard compares against the showing profile's own
+      // generation: a banner for profile A must not navigate after profile A
+      // logs out or switches accounts, regardless of what profile B does.
+      const notificationSessionGeneration = runtime.authSessionGeneration;
       notification.on("click", () => {
-        // A banner emitted for user A must not navigate after the main window
-        // logs out or switches to user B.
-        if (notificationSessionGeneration !== authSessionGeneration) return;
-        // Recreate the main window when an issue-only window outlived it, then
-        // wait for the inbox listener before delivering the navigation.
-        dispatchToMainRenderer("inbox:open", {
-          slug: payload.slug,
-          itemId: payload.itemId,
-          issueKey: payload.issueKey,
-        });
+        if (
+          notificationSessionGeneration !==
+          profileRuntimeFor(profileId).authSessionGeneration
+        ) {
+          return;
+        }
+        // Deliver to the owning profile's window — recreated when an
+        // issue-only window outlived it — and wait for that profile's inbox
+        // listener before the navigation lands.
+        dispatchToMainRenderer(
+          "inbox:open",
+          {
+            slug: payload.slug,
+            itemId: payload.itemId,
+            issueKey: payload.issueKey,
+          },
+          profileId,
+        );
       });
       notification.show();
     });
@@ -957,12 +1053,22 @@ if (!gotTheLock) {
     desktopInitialized = true;
     createMainWindow(configRegistry.defaultProfile);
 
+    // KNOWN LIMITATION (fork phase): auto-update events — the update banner
+    // and quitAndInstall — target the default profile's main window only.
+    // The updater is process-level while windows are per-profile; broadcast
+    // to every profile window is deferred until upstreaming, so non-default
+    // windows learn about updates at the next full app restart.
     setupAutoUpdater(() => defaultMainWindow());
+    // Daemon setup stays single-profile in this phase (Phase 3 makes
+    // DaemonManager per-profile; this getter is its routing seam).
     setupDaemonManager(() => defaultMainWindow());
+    // Sender-first: the handler resolves the dialog's parent from
+    // event.sender and only falls back to this getter, so every profile's
+    // renderer parents its directory picker to its own window.
     setupLocalDirectory(() => defaultMainWindow());
 
     app.on("activate", () => {
-      const window = ensureMainWindow();
+      const window = ensureMainWindowFor(configRegistry.defaultProfile);
       if (window) focusMainWindow(window);
     });
   });

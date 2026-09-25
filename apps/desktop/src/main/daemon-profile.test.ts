@@ -34,6 +34,16 @@ describe("deriveProfileName", () => {
   it("falls back to a fixed name on an unparseable URL", () => {
     expect(deriveProfileName("not a url")).toBe("desktop");
   });
+
+  // Multi-profile: two desktop.json profiles must never fold into one daemon
+  // profile (two DaemonManager instances would fight over one daemon/ port —
+  // mutual kicks, double polling). The registry's duplicate-apiUrl parse
+  // rejection (Phase 1) is the structural guarantee; this pins the derivation.
+  it("derives distinct names for distinct hosts", () => {
+    expect(deriveProfileName("https://api.multica.ai")).not.toBe(
+      deriveProfileName("https://private.example.org"),
+    );
+  });
 });
 
 describe("profile paths", () => {

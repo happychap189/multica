@@ -1059,9 +1059,17 @@ if (!gotTheLock) {
     // to every profile window is deferred until upstreaming, so non-default
     // windows learn about updates at the next full app restart.
     setupAutoUpdater(() => defaultMainWindow());
-    // Daemon setup stays single-profile in this phase (Phase 3 makes
-    // DaemonManager per-profile; this getter is its routing seam).
-    setupDaemonManager(() => defaultMainWindow());
+    // Daemon managers are per-profile (one per desktop.json profile, keyed by
+    // its id). Routing seams: which profile's main window receives a
+    // profile's status/log events, and which profile a requesting renderer
+    // belongs to. The default profile's manager bootstraps at startup;
+    // non-default profiles bootstrap lazily at first routed IPC.
+    setupDaemonManager({
+      defaultProfileId: configRegistry.defaultProfile,
+      windowForProfile: (profileId) => mainWindows.get(profileId) ?? null,
+      profileIdForSender: (webContentsId) =>
+        windowProfiles.lookup(webContentsId),
+    });
     // Sender-first: the handler resolves the dialog's parent from
     // event.sender and only falls back to this getter, so every profile's
     // renderer parents its directory picker to its own window.

@@ -142,7 +142,10 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 	if err := requireHumanLocalCommand("setup"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 
 	cfg := cli.CLIConfig{
 		ServerURL: defaultCloudServerURL,
@@ -184,7 +187,10 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	if err := requireHumanLocalCommand("setup"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Resolve the target URLs before confirming the overwrite so the prompt can
 	// show the incoming values ("old -> new"), making it clear the passed flags
@@ -267,7 +273,10 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 // connected to the previous deployment. Restart that profile when needed;
 // otherwise perform the normal first start.
 func runDaemonAfterSetup(cmd *cobra.Command, args []string) error {
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPortForProfile(profile))
@@ -292,6 +301,12 @@ func dispatchDaemonAfterSetup(
 	start setupDaemonRunner,
 	restart setupDaemonRunner,
 ) error {
+	// resolveProfile errors must reach the setup RunE rather than being
+	// swallowed inside a message-building helper.
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	if daemonAlive(health) {
 		if activeTasks := daemonActiveTaskCount(health); activeTasks > 0 {
 			taskLabel := "tasks"
@@ -299,7 +314,7 @@ func dispatchDaemonAfterSetup(
 				taskLabel = "task"
 			}
 			restartCmd := "multica daemon restart"
-			if profile := resolveProfile(cmd); profile != "" {
+			if profile != "" {
 				restartCmd += " --profile " + profile
 			}
 			return fmt.Errorf(

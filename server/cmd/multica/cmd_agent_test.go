@@ -258,7 +258,11 @@ func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "")
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 
-	if got := resolveToken(testCmd()); got != "" {
+	got, err := resolveToken(testCmd())
+	if err != nil {
+		t.Fatalf("resolveToken() unexpected error: %v", err)
+	}
+	if got != "" {
 		t.Fatalf("resolveToken() = %q, want empty (config PAT must not leak into an escaped daemon subprocess)", got)
 	}
 	if _, err := newAPIClient(testCmd()); err == nil {
@@ -313,7 +317,10 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		got := resolveWorkspaceID(testCmd())
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
 		if got != "config-file-ws" {
 			t.Fatalf("resolveWorkspaceID() = %q, want %q (config fallback)", got, "config-file-ws")
 		}
@@ -325,7 +332,10 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "env-ws")
 
-		got := resolveWorkspaceID(testCmd())
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
 		if got != "env-ws" {
 			t.Fatalf("resolveWorkspaceID() = %q, want %q (env)", got, "env-ws")
 		}
@@ -337,7 +347,10 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		got := resolveWorkspaceID(testCmd())
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
 		if got != "" {
 			t.Fatalf("resolveWorkspaceID() = %q, want empty (no silent config fallback in agent context)", got)
 		}
@@ -349,7 +362,11 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		if got := resolveWorkspaceID(testCmd()); got != "" {
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
 		}
 	})
@@ -360,7 +377,11 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "27182")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		if got := resolveWorkspaceID(testCmd()); got != "" {
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
 		}
 	})
@@ -372,7 +393,11 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		if got := resolveWorkspaceID(testCmd()); got != "" {
+		got, err := resolveWorkspaceID(testCmd())
+		if err != nil {
+			t.Fatalf("resolveWorkspaceID() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
 		}
 	})
@@ -406,7 +431,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token", got)
 		}
 	})
@@ -419,7 +448,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_TOKEN", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 
-		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token", got)
 		}
 	})
@@ -430,7 +463,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveToken() = %q, want empty in agent context without MULTICA_TOKEN", got)
 		}
 	})
@@ -442,7 +479,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
 		}
 	})
@@ -455,7 +496,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
 		}
 	})
@@ -493,7 +538,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token (unreadable marker path must not fail closed)", got)
 		}
 	})
@@ -504,7 +553,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_TOKEN", "mat_task_token")
 
-		if got := resolveToken(testCmd()); got != "mat_task_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mat_task_token" {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
 		}
 	})
@@ -515,7 +568,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_TOKEN", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "19514")
 
-		if got := resolveToken(testCmd()); got != "" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Fatalf("resolveToken() = %q, want empty (daemon port set, fail closed)", got)
 		}
 	})
@@ -526,7 +583,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_TOKEN", "mat_task_token")
 		t.Setenv("MULTICA_DAEMON_PORT", "19514")
 
-		if got := resolveToken(testCmd()); got != "mat_task_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mat_task_token" {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN (task token wins over daemon signal)", got)
 		}
 	})
@@ -542,7 +603,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_SERVER_URL", "https://api.multica.ai")
 
-		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token (SERVER_URL is not a daemon identity signal)", got)
 		}
 	})
@@ -557,7 +622,11 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_SERVER_URL", "")
 
-		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+		got, err := resolveToken(testCmd())
+		if err != nil {
+			t.Fatalf("resolveToken() unexpected error: %v", err)
+		}
+		if got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token (normal CLI flow)", got)
 		}
 	})

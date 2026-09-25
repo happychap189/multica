@@ -247,15 +247,59 @@ func init() {
 	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
 }
 
-// resolveProfile returns the --profile flag value (empty string means default profile).
-func resolveProfile(cmd *cobra.Command) string {
-	val, _ := cmd.Flags().GetString("profile")
-	return val
+// resolveProfile returns the profile this invocation should use, following a
+// four-layer chain (highest wins):
+//
+//  1. explicit --profile flag — format-validated only; existence and the
+//     desktop- ownership boundary are deliberately not applied here so
+//     `login --profile new` can bootstrap a profile and daemon lifecycle
+//     commands guard desktop- separately (requireKnownProfile)
+//  2. suppression: inside a daemon-managed task or a task-local config root,
+//     the machine-level layers below are skipped — env and pointer are host
+//     state that must not steer task-local path selection. This is stricter
+//     than tryResolveServerURL, which intentionally still resolves a profile
+//     in daemon context when a task root is present (feeding server URL
+//     lookups inside the task's own private config root); leaking host-level
+//     env/pointer state into that choice would cross the machine boundary.
+//  3. MULTICA_PROFILE environment variable (empty string = unset)
+//  4. the machine-level current-profile pointer file
+//
+// Empty string means the default profile.
+func resolveProfile(cmd *cobra.Command) (string, error) {
+	if cmd.Flags().Changed("profile") {
+		name, _ := cmd.Flags().GetString("profile")
+		return name, validateProfileNameFormat(name, "--profile")
+	}
+	// Machine-level state (env + pointer) must not steer daemon-managed or
+	// task-local invocations; see the doc comment above.
+	if inDaemonManagedExecutionContext() || strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" {
+		return "", nil
+	}
+	if env := os.Getenv(cli.EnvProfile); env != "" {
+		if err := validateSelectedProfile(env, "env MULTICA_PROFILE"); err != nil {
+			return "", err
+		}
+		return env, nil
+	}
+	name, err := cli.ReadCurrentProfilePointer()
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		return "", nil
+	}
+	if err := validateSelectedProfile(name, "profile pointer"); err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
-	token := resolveToken(cmd)
+	token, err := resolveToken(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if taskContext && !strings.HasPrefix(token, "mat_") {
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
 		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
@@ -270,7 +314,10 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	serverURL := resolveServerURL(cmd)
-	workspaceID := resolveWorkspaceID(cmd)
+	workspaceID, err := resolveWorkspaceID(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
@@ -291,12 +338,12 @@ const (
 	defaultCloudAppURL    = "https://multica.ai"
 )
 
-func tryResolveServerURL(cmd *cobra.Command) string {
+func tryResolveServerURL(cmd *cobra.Command) (string, error) {
 	if val := tryResolveExplicitServerURL(cmd); val != "" {
-		return val
+		return val, nil
 	}
 	if inDaemonManagedExecutionContext() && strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
-		return ""
+		return "", nil
 	}
 	return tryResolveProfileServerURL(cmd)
 }
@@ -305,9 +352,9 @@ func tryResolveServerURL(cmd *cobra.Command) string {
 // passed requireHumanLocalCommand. Unlike the general resolver, a stale
 // MULTICA_DAEMON_PORT in a host/container environment must not hide the human
 // profile that login is explicitly meant to update.
-func tryResolveHumanServerURL(cmd *cobra.Command) string {
+func tryResolveHumanServerURL(cmd *cobra.Command) (string, error) {
 	if val := tryResolveExplicitServerURL(cmd); val != "" {
-		return val
+		return val, nil
 	}
 	return tryResolveProfileServerURL(cmd)
 }
@@ -320,17 +367,26 @@ func tryResolveExplicitServerURL(cmd *cobra.Command) string {
 	return normalizeAPIBaseURL(val)
 }
 
-func tryResolveProfileServerURL(cmd *cobra.Command) string {
-	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err == nil && cfg.ServerURL != "" {
-		return normalizeAPIBaseURL(cfg.ServerURL)
+func tryResolveProfileServerURL(cmd *cobra.Command) (string, error) {
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return "", err
 	}
-	return ""
+	cfg, loadErr := cli.LoadCLIConfigForProfile(profile)
+	if loadErr == nil && cfg.ServerURL != "" {
+		return normalizeAPIBaseURL(cfg.ServerURL), nil
+	}
+	return "", nil
 }
 
 func resolveServerURL(cmd *cobra.Command) string {
-	if val := tryResolveServerURL(cmd); val != "" {
+	val, err := tryResolveServerURL(cmd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+		return "" // unreachable
+	}
+	if val != "" {
 		return val
 	}
 	fmt.Fprintln(os.Stderr, missingServerConfigMessage())
@@ -343,7 +399,13 @@ func missingServerConfigMessage() string {
 }
 
 func resolveHumanServerURL(cmd *cobra.Command) string {
-	if val := tryResolveHumanServerURL(cmd); val != "" {
+	val, err := tryResolveHumanServerURL(cmd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+		return "" // unreachable
+	}
+	if val != "" {
 		return val
 	}
 	fmt.Fprintln(os.Stderr, "No server configured. Run 'multica setup' first.")
@@ -351,11 +413,15 @@ func resolveHumanServerURL(cmd *cobra.Command) string {
 	return "" // unreachable
 }
 
-func resolveLoginTokenServerURL(cmd *cobra.Command) string {
-	if val := tryResolveHumanServerURL(cmd); val != "" {
-		return val
+func resolveLoginTokenServerURL(cmd *cobra.Command) (string, error) {
+	val, err := tryResolveHumanServerURL(cmd)
+	if err != nil {
+		return "", err
 	}
-	return defaultCloudServerURL
+	if val != "" {
+		return val, nil
+	}
+	return defaultCloudServerURL, nil
 }
 
 func normalizeAPIBaseURL(raw string) string {
@@ -480,26 +546,32 @@ func daemonTaskContextMarkerPath() string {
 	}
 }
 
-func resolveWorkspaceID(cmd *cobra.Command) string {
+func resolveWorkspaceID(cmd *cobra.Command) (string, error) {
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {
-		return val
+		return val, nil
 	}
 	// Inside an agent task the daemon is the only authority on workspace
 	// identity. Never read the user-global CLI config here.
 	if inDaemonManagedExecutionContext() {
-		return ""
+		return "", nil
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return "", err
+	}
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	return cfg.WorkspaceID
+	return cfg.WorkspaceID, nil
 }
 
 // requireWorkspaceID resolves the workspace ID and returns an error with
 // actionable instructions if it is empty (e.g. user has multiple workspaces
 // but no default configured).
 func requireWorkspaceID(cmd *cobra.Command) (string, error) {
-	id := resolveWorkspaceID(cmd)
+	id, err := resolveWorkspaceID(cmd)
+	if err != nil {
+		return "", err
+	}
 	if id == "" {
 		if inDaemonManagedExecutionContext() {
 			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")

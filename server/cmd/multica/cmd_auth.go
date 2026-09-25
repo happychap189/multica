@@ -70,20 +70,23 @@ func init() {
 	authCmd.AddCommand(authLogoutCmd)
 }
 
-func resolveToken(cmd *cobra.Command) string {
+func resolveToken(cmd *cobra.Command) (string, error) {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
-		return v
+		return v, nil
 	}
 	// Inside a daemon-managed task, never fall back to the user-global config
 	// token: that silent fallback is how agent writes land as the wrong actor.
 	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
 	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
 	if inDaemonManagedExecutionContext() {
-		return ""
+		return "", nil
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return "", err
+	}
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	return cfg.Token
+	return cfg.Token, nil
 }
 
 func resolveAppURL(cmd *cobra.Command) string {
@@ -92,7 +95,12 @@ func resolveAppURL(cmd *cobra.Command) string {
 			return strings.TrimRight(val, "/")
 		}
 	}
-	profile := resolveProfile(cmd)
+	profile, perr := resolveProfile(cmd)
+	if perr != nil {
+		fmt.Fprintln(os.Stderr, perr)
+		os.Exit(1)
+		return "" // unreachable
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err == nil && cfg.AppURL != "" {
 		return strings.TrimRight(cfg.AppURL, "/")
@@ -346,7 +354,10 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	// Save to config. Reset workspace data on every login — the user or
 	// server may have changed, so stale workspaces must not persist.
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
 	cfg.Token = patResp.Token
@@ -433,7 +444,10 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return err
 	}
 
-	serverURL := resolveLoginTokenServerURL(cmd)
+	serverURL, err := resolveLoginTokenServerURL(cmd)
+	if err != nil {
+		return err
+	}
 	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -447,7 +461,10 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return cli.WithUserMessageUnlessNetwork("Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again.", err)
 	}
 
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
 	cfg.Token = token
@@ -468,7 +485,10 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	taskContext := inDaemonManagedExecutionContext()
-	token := resolveToken(cmd)
+	token, err := resolveToken(cmd)
+	if err != nil {
+		return err
+	}
 	if taskContext && !strings.HasPrefix(token, "mat_") {
 		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
 	}
@@ -549,7 +569,10 @@ func runAuthLogout(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("logout"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	if cfg.Token == "" {
 		fmt.Fprintln(os.Stderr, "Not authenticated.")

@@ -98,7 +98,7 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 		t.Fatalf("set flag: %v", err)
 	}
 
-	args := buildDaemonStartArgs(cmd)
+	args := buildDaemonStartArgs(cmd, "")
 	want := []string{"daemon", "start", "--foreground", "--codex-handshake-timeout", (42 * time.Second).String()}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
@@ -112,7 +112,7 @@ func TestBuildDaemonStartArgsForwardsWSClaimPollInterval(t *testing.T) {
 		t.Fatalf("set flag: %v", err)
 	}
 
-	args := buildDaemonStartArgs(cmd)
+	args := buildDaemonStartArgs(cmd, "")
 	want := []string{"daemon", "start", "--foreground", "--ws-claim-poll-interval", (3 * time.Minute).String()}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
@@ -126,7 +126,7 @@ func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
 		t.Fatalf("set flag: %v", err)
 	}
 
-	args := buildDaemonStartArgs(cmd)
+	args := buildDaemonStartArgs(cmd, "")
 	want := []string{"daemon", "start", "--foreground", "--workspaces-root", "/Volumes/Agent Workspaces"}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
@@ -143,7 +143,7 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 		t.Fatalf("set flag: %v", err)
 	}
 
-	args := buildDaemonStartArgs(cmd)
+	args := buildDaemonStartArgs(cmd, "")
 	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)

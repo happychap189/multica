@@ -14,18 +14,21 @@ import (
 
 // tryResolveAppURL returns the app URL if configured, or "" if not available.
 // Unlike resolveAppURL, it never calls os.Exit.
-func tryResolveAppURL(cmd *cobra.Command) string {
+func tryResolveAppURL(cmd *cobra.Command) (string, error) {
 	for _, key := range []string{"MULTICA_APP_URL", "FRONTEND_ORIGIN"} {
 		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-			return strings.TrimRight(val, "/")
+			return strings.TrimRight(val, "/"), nil
 		}
 	}
-	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err == nil && cfg.AppURL != "" {
-		return strings.TrimRight(cfg.AppURL, "/")
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return "", err
 	}
-	return ""
+	cfg, loadErr := cli.LoadCLIConfigForProfile(profile)
+	if loadErr == nil && cfg.AppURL != "" {
+		return strings.TrimRight(cfg.AppURL, "/"), nil
+	}
+	return "", nil
 }
 
 var loginCmd = &cobra.Command{
@@ -88,7 +91,10 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	// newly authenticated profile. Read that exact profile here rather than the
 	// general task-safe resolvers, which intentionally fail closed on a lone
 	// MULTICA_DAEMON_PORT signal.
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
 		return err
@@ -154,7 +160,10 @@ func waitForWorkspaceCreation(cmd *cobra.Command, client *cli.APIClient) ([]stru
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }, error) {
-	appURL := tryResolveAppURL(cmd)
+	appURL, err := tryResolveAppURL(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if appURL == "" {
 		// No app URL available (e.g. token login without prior setup).
 		// Can't open the browser — tell the user to create a workspace manually.

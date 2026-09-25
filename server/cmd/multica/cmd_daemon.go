@@ -159,8 +159,12 @@ func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
 		return err
 	}
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
-		Profile:       resolveProfile(cmd),
+		Profile:       profile,
 		AllowNoAgents: true,
 	})
 	if err != nil {
@@ -553,7 +557,10 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 }
 
 func runDaemonBackground(cmd *cobra.Command) error {
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	healthPort := healthPortForProfile(profile)
 
 	// Check if daemon is already running.
@@ -587,7 +594,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	// Build child args: daemon start --foreground + forwarded flags.
-	args := buildDaemonStartArgs(cmd)
+	args := buildDaemonStartArgs(cmd, profile)
 
 	// Ensure daemon directory exists.
 	dir := daemonDirForProfile(profile)
@@ -853,7 +860,10 @@ func readLogTailSince(logPath string, sinceOffset int64, maxLines int) []string 
 }
 
 // buildDaemonStartArgs constructs args for the background child process.
-func buildDaemonStartArgs(cmd *cobra.Command) []string {
+// profile is the caller's already-resolved profile (see resolveProfile): the
+// helper has no error channel of its result, and resolution errors must abort
+// the start before anything is spawned.
+func buildDaemonStartArgs(cmd *cobra.Command, profile string) []string {
 	args := []string{"daemon", "start", "--foreground"}
 
 	if v := flagString(cmd, "daemon-id"); v != "" {
@@ -906,8 +916,8 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
 		args = append(args, "--server-url", v)
 	}
-	if v := resolveProfile(cmd); v != "" {
-		args = append(args, "--profile", v)
+	if profile != "" {
+		args = append(args, "--profile", profile)
 	}
 
 	return args
@@ -916,7 +926,10 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 func runDaemonForeground(cmd *cobra.Command) error {
 	util.EnsureHiddenConsole()
 
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Load the profile config once — several daemon knobs fall back to
 	// values persisted here when both the CLI flag and the env var are
@@ -1106,7 +1119,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			_ = logRotator.Close()
 		}
 
-		args := buildDaemonStartArgs(cmd)
+		args := buildDaemonStartArgs(cmd, profile)
 		child := exec.Command(restartBin, args...)
 
 		// The successor is a fresh foreground daemon that will open daemon.log
@@ -1212,7 +1225,10 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	if err := requireHumanLocalCommand("daemon restart"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
@@ -1270,7 +1286,10 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon stop"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
@@ -1360,7 +1379,10 @@ func requestDaemonShutdown(healthPort int) error {
 // --- daemon status ---
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	healthPort, err := daemonStatusHealthPort(cmd)
 	if err != nil {
 		return err
@@ -1444,7 +1466,10 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 // hosted by a named-profile daemon it would silently probe the default daemon
 // instead. A missing port fails closed rather than guessing.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return 0, err
+	}
 	if !inDaemonTaskIdentityContext() {
 		return healthPortForProfile(profile), nil
 	}
@@ -1552,7 +1577,10 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon logs"); err != nil {
 		return err
 	}
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
@@ -1774,7 +1802,10 @@ func resolveDaemonDisableSignal(flagValue bool, envName string, cfgValue bool) b
 
 func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	taskContext := inDaemonManagedExecutionContext()
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
 	byWorkspace, _ := cmd.Flags().GetBool("by-workspace")
 	byTask, _ := cmd.Flags().GetBool("by-task")

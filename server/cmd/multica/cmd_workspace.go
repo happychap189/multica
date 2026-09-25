@@ -224,7 +224,10 @@ type workspaceSummary struct {
 // of workspaces.
 func fetchWorkspaces(ctx context.Context, cmd *cobra.Command) ([]workspaceSummary, error) {
 	serverURL := resolveServerURL(cmd)
-	token := resolveToken(cmd)
+	token, err := resolveToken(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if token == "" {
 		return nil, fmt.Errorf("not authenticated: run 'multica login' first%s", daemonPortOnlyContextHint())
 	}
@@ -256,7 +259,10 @@ func runWorkspaceList(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	currentID := resolveWorkspaceID(cmd)
+	currentID, err := resolveWorkspaceID(cmd)
+	if err != nil {
+		return err
+	}
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "\tID\tNAME\tSLUG")
@@ -441,7 +447,10 @@ func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
 		return err
@@ -476,7 +485,11 @@ func resolveWorkspaceArg(cmd *cobra.Command, args []string) (string, error) {
 		}
 		return ws.ID, nil
 	}
-	return resolveWorkspaceID(cmd), nil
+	id, err := resolveWorkspaceID(cmd)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func runWorkspaceGet(cmd *cobra.Command, args []string) error {

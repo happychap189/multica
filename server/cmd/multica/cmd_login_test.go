@@ -23,7 +23,11 @@ func TestResolveLoginTokenServerURLDefaultsToCloud(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
-	if got := resolveLoginTokenServerURL(newLoginTestCmd()); got != defaultCloudServerURL {
+	got, err := resolveLoginTokenServerURL(newLoginTestCmd())
+	if err != nil {
+		t.Fatalf("resolveLoginTokenServerURL() unexpected error: %v", err)
+	}
+	if got != defaultCloudServerURL {
 		t.Fatalf("resolveLoginTokenServerURL() = %q, want %q", got, defaultCloudServerURL)
 	}
 }
@@ -46,7 +50,11 @@ func TestResolveLoginTokenServerURLPrefersConfiguredServer(t *testing.T) {
 		t.Fatalf("SaveCLIConfig: %v", err)
 	}
 
-	if got := resolveLoginTokenServerURL(cmd); got != "https://api.example.test" {
+	got, err := resolveLoginTokenServerURL(cmd)
+	if err != nil {
+		t.Fatalf("resolveLoginTokenServerURL() unexpected error: %v", err)
+	}
+	if got != "https://api.example.test" {
 		t.Fatalf("resolveLoginTokenServerURL() = %q, want configured server", got)
 	}
 }

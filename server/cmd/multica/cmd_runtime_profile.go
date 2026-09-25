@@ -318,7 +318,10 @@ func runRuntimeProfileSetPath(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--path must be an absolute path, got %q", path)
 	}
 
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
@@ -341,7 +344,10 @@ func runRuntimeProfileUnsetPath(cmd *cobra.Command, args []string) error {
 	}
 	profileID := args[0]
 
-	profile := resolveProfile(cmd)
+	profile, err := resolveProfile(cmd)
+	if err != nil {
+		return err
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)

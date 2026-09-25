@@ -20,6 +20,7 @@ import {
   resolveRuntimeConfigForProfile,
 } from "./window-profile-registry";
 import { resolveLastActiveProfileId } from "./last-active-profile";
+import { createLoginIntentRegistry } from "./deep-link-registry";
 import { loadDesktopConfig, type DesktopConfigResult } from "./runtime-config-loader";
 import {
   DEFAULT_DESKTOP_CONFIG_REGISTRY,
@@ -148,6 +149,11 @@ const mainWindows = new Map<string, BrowserWindow>();
 // windows). Registered before each window's loadRenderer() call so the
 // preload's synchronous `runtime-config:get` resolves on the first IPC.
 const windowProfiles = createWindowProfileRegistry();
+// Layer 1 of the deep-link safety net: the profile that opened the browser to
+// log in is recorded here (login-page `openExternal` calls only — explicit
+// `intent: "login"`), and the next `multica://auth/callback` deep link is
+// routed there first. See deep-link-registry.ts.
+const loginIntents = createLoginIntentRegistry();
 const issueWindows = new Set<BrowserWindow>();
 const notificationGate = new NotificationGate();
 let desktopInitialized = false;
@@ -257,11 +263,13 @@ function ensureMainWindowFor(profileId: string): BrowserWindow | null {
 }
 
 // Deliver to one profile's main window, honoring that profile's own readiness
-// queue. An explicit profile (notification click, chord relay) targets its
-// owning window; profile-less dispatches (deep links) go to the last focused
-// profile's window, falling back to the default profile. Deep links gain
-// safer per-profile routing in Phase 4; until then this is the documented
-// interim target.
+// queue. An explicit profile (notification click, chord relay, a consumed
+// login intent) targets its owning window; profile-less dispatches (invite
+// deep links) go to the last focused profile's window, falling back to the
+// default profile. Auth callbacks are dispatched with the registered login
+// intent profile when one is on record (deep-link-registry.ts), else the same
+// last-focused fallback — with the renderer-side token probe and state
+// rollback (deep-link-auth.ts) protecting the target window.
 function dispatchToMainRenderer(
   channel: MainRendererMessageChannel,
   payload: unknown,
@@ -288,7 +296,17 @@ function handleDeepLink(url: string): void {
     // multica://auth/callback?token=<jwt>
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
       const token = parsed.searchParams.get("token");
-      if (token) dispatchToMainRenderer("auth:token", token);
+      if (token) {
+        // Layer 1: an auth callback belongs to the profile that opened the
+        // browser to log in, when one is on record. One-shot: consumed here
+        // whether or not the record is still within TTL, so a stale slot can
+        // never steer a later, unrelated callback. Without a record (expired,
+        // evicted by a competing login, or lost to an app restart) routing
+        // degrades to last-focused/default, where the renderer-side token
+        // probe and state rollback still protect the target window.
+        const intendedProfile = loginIntents.consume(Date.now());
+        dispatchToMainRenderer("auth:token", token, intendedProfile);
+      }
       return;
     }
 
@@ -296,6 +314,9 @@ function handleDeepLink(url: string): void {
     // Dispatched from the web invite page when the user chooses "Open in
     // desktop app". The renderer opens the invite overlay — no tab, no
     // route persistence, so deep-linking the same invite twice stays safe.
+    // The invitation id is a read-only parameter: the overlay only fetches
+    // and displays the invitation, mutating nothing, so delivering it to a
+    // non-originating profile is non-destructive (unlike an auth callback).
     if (parsed.hostname === "invite") {
       const id = parsed.pathname.replace(/^\//, "");
       if (id) dispatchToMainRenderer("invite:open", decodeURIComponent(id));
@@ -837,9 +858,23 @@ if (!gotTheLock) {
     // is the single audit point for renderer-controlled URLs reaching the
     // OS shell under the app's intentional webSecurity: false configuration
     // (the renderer itself runs sandboxed).
-    ipcMain.handle("shell:openExternal", (_event, url: string) => {
-      return openExternalSafely(url);
-    });
+    //
+    // Layer 1 of the deep-link safety net: only an explicit `intent: "login"`
+    // (the login page's Google-login flow) records this window's profile as
+    // the intended target of the next auth/callback deep link. Everyday
+    // external-link traffic — issue content links, changelog links — passes
+    // through this same handler without an intent and never evicts a pending
+    // login registration.
+    ipcMain.handle(
+      "shell:openExternal",
+      (event, url: string, options?: { intent?: string }) => {
+        if (options?.intent === "login") {
+          const profileId = windowProfiles.lookup(event.sender.id);
+          if (profileId) loginIntents.register(profileId, Date.now());
+        }
+        return openExternalSafely(url);
+      },
+    );
 
     // Renderer requests its own window close (e.g. Cmd+W on the last main
     // tab, or Cmd+W anywhere in a dedicated issue window).

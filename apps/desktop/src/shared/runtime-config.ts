@@ -13,6 +13,73 @@ export type RuntimeConfigResult =
   | { ok: true; config: RuntimeConfig }
   | { ok: false; error: RuntimeConfigError };
 
+// Schema v2 named-server registry for desktop.json. Schema v1 files hold a
+// single implicit server; v2 files hold named profiles with a designated
+// default. RuntimeConfig stays the resolved single-profile view consumed by
+// preload/renderer.
+export const DESKTOP_CONFIG_SCHEMA_VERSION = 2 as const;
+
+export interface DesktopServerProfile {
+  apiUrl: string;
+  wsUrl?: string;
+  appUrl?: string;
+}
+
+export interface DesktopConfigRegistry {
+  schemaVersion: typeof DESKTOP_CONFIG_SCHEMA_VERSION;
+  defaultProfile: string;
+  profiles: Record<string, DesktopServerProfile>;
+}
+
+export interface ParsedDesktopConfig {
+  registry: DesktopConfigRegistry;
+  // True when a schema v1 file was upgraded to the registry shape. The
+  // migrated registry is valid for this run; the loader persists it.
+  migrated: boolean;
+}
+
+export const DEFAULT_DESKTOP_CONFIG_REGISTRY: DesktopConfigRegistry = Object.freeze({
+  schemaVersion: DESKTOP_CONFIG_SCHEMA_VERSION,
+  defaultProfile: "default",
+  profiles: Object.freeze({
+    default: Object.freeze({
+      apiUrl: "https://api.multica.ai",
+      wsUrl: "wss://api.multica.ai/ws",
+      appUrl: "https://multica.ai",
+    }),
+  }),
+});
+
+// Wrap a resolved single-profile config as the sole "default" profile of a
+// v2 registry. Used by the v1 migration and the dev-env branch.
+export function singleProfileRegistry(config: RuntimeConfig): DesktopConfigRegistry {
+  return {
+    schemaVersion: DESKTOP_CONFIG_SCHEMA_VERSION,
+    defaultProfile: "default",
+    profiles: {
+      default: { apiUrl: config.apiUrl, wsUrl: config.wsUrl, appUrl: config.appUrl },
+    },
+  };
+}
+
+// Project one registry profile to the resolved single-profile view, deriving
+// wsUrl/appUrl when the file omits them.
+export function resolveProfileRuntimeConfig(
+  registry: DesktopConfigRegistry,
+  profileId: string,
+): RuntimeConfig {
+  const profile = registry.profiles[profileId];
+  if (!profile) {
+    throw new Error(`Unknown desktop config profile: ${profileId}`);
+  }
+  return {
+    schemaVersion: 1,
+    apiUrl: profile.apiUrl,
+    wsUrl: profile.wsUrl ?? deriveWsUrl(profile.apiUrl),
+    appUrl: profile.appUrl ?? deriveAppUrl(profile.apiUrl),
+  };
+}
+
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
   apiUrl: "https://api.multica.ai",
@@ -50,7 +117,7 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
   };
 }
 
-export function parseRuntimeConfig(raw: string): RuntimeConfig {
+function parseConfigObject(raw: string): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -63,8 +130,10 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Invalid desktop runtime config: expected a JSON object");
   }
+  return parsed as Record<string, unknown>;
+}
 
-  const obj = parsed as Record<string, unknown>;
+function parseV1ConfigObject(obj: Record<string, unknown>): RuntimeConfig {
   if (obj.schemaVersion !== 1) {
     throw new Error("Unsupported desktop runtime config schemaVersion: expected 1");
   }
@@ -80,6 +149,97 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
     wsUrl: wsUrl ? normalizeWsUrl(wsUrl, "wsUrl") : deriveWsUrl(normalizedApiUrl),
     appUrl: appUrl ? normalizeHttpUrl(appUrl, "appUrl") : deriveAppUrl(normalizedApiUrl),
   };
+}
+
+export function parseRuntimeConfig(raw: string): RuntimeConfig {
+  return parseV1ConfigObject(parseConfigObject(raw));
+}
+
+// Registry parser for desktop.json. Accepts both schema versions:
+// - v1 (single implicit server) is migrated to a single "default" profile;
+//   `migrated: true` tells the loader to persist the migrated registry.
+// - v2 validates the named-profile registry:
+//   * profile ids must match /^[a-z0-9-]{1,32}$/ — the single validation
+//     point covering partition names, window-state filenames, and Dock menu
+//     ids downstream;
+//   * apiUrls must be distinct after normalization, so `https://x.com`,
+//     `https://x.com:443`, and `https://x.com/` fold to one canonical value
+//     and count as the same server. Two profiles pointing at one server
+//     would fight over the same derived daemon profile (same host + port),
+//     so parse rejects them.
+export function parseDesktopConfig(raw: string): ParsedDesktopConfig {
+  const obj = parseConfigObject(raw);
+  if (obj.schemaVersion === 1) {
+    return {
+      registry: singleProfileRegistry(parseV1ConfigObject(obj)),
+      migrated: true,
+    };
+  }
+  if (obj.schemaVersion === 2) {
+    return { registry: parseV2ConfigObject(obj), migrated: false };
+  }
+  throw new Error("Unsupported desktop runtime config schemaVersion: expected 1 or 2");
+}
+
+function parseV2ConfigObject(obj: Record<string, unknown>): DesktopConfigRegistry {
+  const profilesRaw = obj.profiles;
+  if (!profilesRaw || typeof profilesRaw !== "object" || Array.isArray(profilesRaw)) {
+    throw new Error("Invalid desktop runtime config: profiles must be an object");
+  }
+
+  const entries = Object.entries(profilesRaw as Record<string, unknown>);
+  if (entries.length === 0) {
+    throw new Error("Invalid desktop runtime config: profiles must not be empty");
+  }
+
+  const profiles: Record<string, DesktopServerProfile> = {};
+  // Uniqueness key: normalizeHttpUrl output is already canonical — WHATWG
+  // parsing lowercases the host and omits default ports, search/hash are
+  // cleared, and trimTrailingSlash removes the trailing slash. `https://x.com`,
+  // `https://x.com:443`, and `https://x.com/` therefore collapse to one key.
+  const canonicalApiUrls = new Map<string, string>();
+  for (const [profileId, value] of entries) {
+    if (!/^[a-z0-9-]{1,32}$/.test(profileId)) {
+      throw new Error(
+        `Invalid desktop runtime config: profile id "${profileId}" must match /^[a-z0-9-]{1,32}$/`,
+      );
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`Invalid desktop runtime config: profile "${profileId}" must be an object`);
+    }
+    const fields = value as Record<string, unknown>;
+    const apiUrlField = `profile "${profileId}" apiUrl`;
+    const apiUrl = normalizeHttpUrl(
+      requiredString(fields.apiUrl, apiUrlField),
+      apiUrlField,
+    );
+    const duplicate = canonicalApiUrls.get(apiUrl);
+    if (duplicate !== undefined) {
+      throw new Error(
+        `Invalid desktop runtime config: profiles "${duplicate}" and "${profileId}" have the same apiUrl (${apiUrl}); each profile must point to a distinct server`,
+      );
+    }
+    canonicalApiUrls.set(apiUrl, profileId);
+
+    const profile: DesktopServerProfile = { apiUrl };
+    const wsUrl = optionalString(fields.wsUrl, `profile "${profileId}" wsUrl`);
+    if (wsUrl !== undefined) {
+      profile.wsUrl = normalizeWsUrl(wsUrl, `profile "${profileId}" wsUrl`);
+    }
+    const appUrl = optionalString(fields.appUrl, `profile "${profileId}" appUrl`);
+    if (appUrl !== undefined) {
+      profile.appUrl = normalizeHttpUrl(appUrl, `profile "${profileId}" appUrl`);
+    }
+    profiles[profileId] = profile;
+  }
+
+  const defaultProfile = requiredString(obj.defaultProfile, "defaultProfile");
+  if (!(defaultProfile in profiles)) {
+    throw new Error(
+      `Invalid desktop runtime config: defaultProfile "${defaultProfile}" does not match any profile`,
+    );
+  }
+  return { schemaVersion: DESKTOP_CONFIG_SCHEMA_VERSION, defaultProfile, profiles };
 }
 
 export function deriveWsUrl(apiUrl: string): string {

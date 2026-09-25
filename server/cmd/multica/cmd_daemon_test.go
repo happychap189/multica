@@ -989,6 +989,7 @@ func clearDaemonTaskEnv(t *testing.T) {
 		"MULTICA_TASK_ID",
 		"MULTICA_DAEMON_PORT",
 		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_LAUNCHED_BY",
 		daemon.TaskWorkspacesRootEnv,
 	} {
 		t.Setenv(key, "")

@@ -17,6 +17,13 @@ const (
 	// phase-one hardening keeps the real HOME/XDG environment available to
 	// provider tooling while preventing implicit Owner-profile discovery.
 	TaskConfigRootEnv = "MULTICA_TASK_CONFIG_ROOT"
+
+	// EnvProfile is the environment layer of the profile resolution chain
+	// (--profile flag > MULTICA_PROFILE > current-profile pointer file >
+	// default). It lets a shell session or an agent session pin a profile per
+	// invocation without mutating machine state; the pointer file is the
+	// machine-wide default beneath it.
+	EnvProfile = "MULTICA_PROFILE"
 )
 
 // CLIConfig holds persistent CLI settings.

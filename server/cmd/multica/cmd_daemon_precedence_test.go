@@ -295,3 +295,24 @@ func TestResolveDaemonDisableSignalPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildDaemonStartArgsForwardsResolvedProfile pins the daemon child
+// forwarding contract (AC7): the background parent passes the profile it
+// resolved through the full chain, so a pointer at company makes the child's
+// argv carry --profile company. An empty resolved profile forwards nothing.
+func TestBuildDaemonStartArgsForwardsResolvedProfile(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	args := buildDaemonStartArgs(cmd, "company")
+	want := []string{"daemon", "start", "--foreground", "--profile", "company"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+
+	args = buildDaemonStartArgs(cmd, "")
+	want = []string{"daemon", "start", "--foreground"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}

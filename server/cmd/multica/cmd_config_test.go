@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -429,5 +430,151 @@ func TestPollIntervalRoundTripThroughDuration(t *testing.T) {
 	}
 	if want := time.Minute + 30*time.Second; got != want {
 		t.Fatalf("parsed = %v, want %v", got, want)
+	}
+}
+
+// TestConfigSetProfilePointerRoundTrip covers AC1: after `config set profile
+// company`, a bare `config show` resolves through the pointer and renders the
+// existing 6-space-aligned Profile header plus the profile's config path.
+func TestConfigSetProfilePointerRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	clearDaemonTaskEnv(t)
+	t.Chdir(t.TempDir())
+
+	// The profile must exist: the pointer layer validates existence.
+	dir := filepath.Join(home, ".multica", "profiles", "company")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newConfigTestCmd()
+	stderr := captureStderr(t)
+	if err := runConfigSet(cmd, []string{"profile", "company"}); err != nil {
+		t.Fatalf("runConfigSet profile company: %v", err)
+	}
+	if got := stderr.read(); !strings.Contains(got, "Set profile = company") {
+		t.Fatalf("stderr = %q, want 'Set profile = company'", got)
+	}
+
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	if !strings.Contains(out, "Profile:      company") {
+		t.Fatalf("show output missing pinned Profile header:\n%s", out)
+	}
+	if !strings.Contains(out, filepath.Join(home, ".multica", "profiles", "company", "config.json")) {
+		t.Fatalf("show output missing profile config path:\n%s", out)
+	}
+	if !strings.Contains(out, "Profile pointer: company") {
+		t.Fatalf("show output missing pointer line:\n%s", out)
+	}
+}
+
+// TestConfigSetProfilePointerSelfHeal covers AC5: while the pointer is
+// dangling, both repair forms — pointing at a valid profile and clearing —
+// still work, because the command never resolves the chain it repairs.
+func TestConfigSetProfilePointerSelfHeal(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t, "company")
+
+	// Dangle the pointer at a profile that does not exist.
+	if err := cli.WriteCurrentProfilePointer("ghost"); err != nil {
+		t.Fatalf("write dangling pointer: %v", err)
+	}
+
+	cmd := newConfigTestCmd()
+	if err := runConfigSet(cmd, []string{"profile", "company"}); err != nil {
+		t.Fatalf("repair via set: %v", err)
+	}
+	if name, err := cli.ReadCurrentProfilePointer(); err != nil || name != "company" {
+		t.Fatalf("pointer = (%q, %v), want (company, nil)", name, err)
+	}
+
+	// Dangle again, then clear.
+	if err := cli.WriteCurrentProfilePointer("ghost"); err != nil {
+		t.Fatalf("write dangling pointer: %v", err)
+	}
+	if err := runConfigSet(cmd, []string{"profile", ""}); err != nil {
+		t.Fatalf("repair via clear: %v", err)
+	}
+	if name, err := cli.ReadCurrentProfilePointer(); err != nil || name != "" {
+		t.Fatalf("pointer = (%q, %v), want cleared", name, err)
+	}
+}
+
+// TestConfigSetProfilePointerClear covers AC8: clearing deletes the pointer
+// file, bare calls fall back to the default profile layout, and `config show`
+// drops the Profile line and reports the pointer as not set.
+func TestConfigSetProfilePointerClear(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	home := mkProfiles(t, "company")
+
+	cmd := newConfigTestCmd()
+	if err := runConfigSet(cmd, []string{"profile", "company"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	pointerPath := filepath.Join(home, ".multica", "current-profile")
+	if _, err := os.Stat(pointerPath); err != nil {
+		t.Fatalf("pointer file should exist after set: %v", err)
+	}
+	if err := runConfigSet(cmd, []string{"profile", ""}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if _, err := os.Stat(pointerPath); !os.IsNotExist(err) {
+		t.Fatalf("pointer file should be gone after clear, stat err = %v", err)
+	}
+
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	if strings.Contains(out, "Profile:") {
+		t.Fatalf("show output must have no Profile line after clear:\n%s", out)
+	}
+	if !strings.Contains(out, "Profile pointer: (not set)") {
+		t.Fatalf("show output must report the pointer as not set:\n%s", out)
+	}
+}
+
+// TestConfigSetProfilePointerRejectsUnknown covers AC10: a nonexistent value
+// fails, lists the known profiles, and leaves the pointer file untouched.
+func TestConfigSetProfilePointerRejectsUnknown(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t, "company")
+
+	if err := cli.WriteCurrentProfilePointer("company"); err != nil {
+		t.Fatalf("write pointer: %v", err)
+	}
+
+	cmd := newConfigTestCmd()
+	err := runConfigSet(cmd, []string{"profile", "nonexistent"})
+	var unknown *unknownProfileError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("runConfigSet = %v, want *unknownProfileError", err)
+	}
+	if !strings.Contains(err.Error(), "company") {
+		t.Fatalf("error %q should list known profiles", err)
+	}
+	if name, rerr := cli.ReadCurrentProfilePointer(); rerr != nil || name != "company" {
+		t.Fatalf("pointer = (%q, %v), want unchanged (company)", name, rerr)
+	}
+}
+
+// TestConfigSetProfileRejectedInTaskContext covers AC11: the pointer is
+// machine-level state and cannot be written from a task-local config root.
+func TestConfigSetProfileRejectedInTaskContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	cmd := newConfigTestCmd()
+	err := runConfigSet(cmd, []string{"profile", "company"})
+	if err == nil || !strings.Contains(err.Error(), "machine-level") {
+		t.Fatalf("runConfigSet = %v, want machine-level rejection", err)
 	}
 }

@@ -345,3 +345,54 @@ func TestDaemonStatusTaskContextRejectsProfileBeforeListing(t *testing.T) {
 		t.Fatalf("stdout = %q, must never disclose Owner profile names inside a task", out)
 	}
 }
+
+// TestDaemonLifecycleCommandsRejectDesktopProfiles covers AC6: desktop-
+// prefixed names are hard-rejected for lifecycle commands even when the
+// profile EXISTS on disk — the rejection is the ownership boundary, not a
+// missing-directory error. `daemon start` is likewise routed: a CLI-spawned
+// daemon must not be started under a desktop-owned name.
+func TestDaemonLifecycleCommandsRejectDesktopProfiles(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*cobra.Command) error
+	}{
+		{"stop", func(c *cobra.Command) error { return runDaemonStop(c, nil) }},
+		{"restart", func(c *cobra.Command) error { return runDaemonRestart(c, nil) }},
+		{"logs", func(c *cobra.Command) error { return runDaemonLogs(c, nil) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearDaemonTaskEnv(t)
+			mkProfiles(t, "desktop-x")
+
+			cmd := daemonStatusCmdFor(t, "desktop-x", "")
+			cmd.Flags().Bool("follow", false, "")
+			cmd.Flags().Int("lines", 50, "")
+
+			err := tc.run(cmd)
+			if err == nil || !strings.Contains(err.Error(), "managed by the Multica desktop app") {
+				t.Fatalf("daemon %s = %v, want desktop-ownership rejection", tc.name, err)
+			}
+		})
+	}
+}
+
+// The read-only boundary is deliberately not closed: `--profile desktop-x
+// config show` succeeds so a power user can inspect the desktop profile, and
+// lifecycle commands carry the guard instead.
+func TestConfigShowWithDesktopProfileStillWorks(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t, "desktop-x")
+
+	cmd := newConfigTestCmd()
+	if err := cmd.Flags().Set("profile", "desktop-x"); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow = %v, want success for explicit desktop- profile", err)
+	}
+	if !strings.Contains(out, "Profile:      desktop-x") {
+		t.Fatalf("show output missing desktop profile header:\n%s", out)
+	}
+}

@@ -12,6 +12,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
+import { toast } from "sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
@@ -23,6 +24,11 @@ import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
 import { useTabSelectionShortcut } from "./hooks/use-tab-selection-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
+import {
+  consumeDeepLinkRollbackNotice,
+  handleDeepLinkAuthToken,
+  WRONG_SERVER_NOTICE,
+} from "./platform/deep-link-auth";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
@@ -142,13 +148,32 @@ function AppContent() {
   }, []);
 
   // Listen for auth token delivered via deep link (multica://auth/callback?token=...).
+  // The handler is Layers 2+3 of the deep-link safety net (platform/deep-link-auth):
+  // it probes the candidate token against this window's own server before any
+  // session-touching call, then runs loginWithToken under rollback protection.
   // daemonAPI.syncToken is handled separately by the [user] effect below, which
   // fires whenever a user logs in (deep link, session restore, account switch).
   useEffect(() => {
+    if (!runtimeConfig) return;
     return window.desktopAPI.onAuthToken(async (token) => {
       setBootstrapping(true);
       try {
-        await useAuthStore.getState().loginWithToken(token);
+        const loggedIn = await handleDeepLinkAuthToken(
+          {
+            apiUrl: runtimeConfig.apiUrl,
+            fetch: window.fetch.bind(window),
+            storage: window.localStorage,
+            session: window.sessionStorage,
+            reload: () => window.location.reload(),
+            notifyWrongServer: () => toast.error(WRONG_SERVER_NOTICE),
+            loginWithToken: (t) => useAuthStore.getState().loginWithToken(t),
+            setApiToken: (t) => api.setToken(t),
+            getUser: () => useAuthStore.getState().user,
+            setUser: (u) => useAuthStore.getState().setUser(u),
+          },
+          token,
+        );
+        if (!loggedIn) return;
         // Seed React Query cache with the workspace list so the index-route
         // redirect (routes.tsx `IndexRedirect`) can resolve the initial
         // destination without a second fetch. Workspace side-effects
@@ -162,7 +187,14 @@ function AppContent() {
         setBootstrapping(false);
       }
     });
-  }, [qc]);
+  }, [qc, runtimeConfig]);
+
+  // Layer 3 rollback path: before the reload, the failed login wrote a notice
+  // into sessionStorage. Surface it exactly once, then drop it.
+  useEffect(() => {
+    const notice = consumeDeepLinkRollbackNotice(window.sessionStorage);
+    if (notice) toast.error(notice);
+  }, []);
 
   // Sync token and start the daemon whenever the user logs in. The ordering
   // inside syncDaemonOnLogin is load-bearing — see that module.

@@ -45,8 +45,10 @@ interface DesktopAPI {
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
-  /** Open a URL in the default browser. */
-  openExternal: (url: string) => Promise<void>;
+  /** Open a URL in the default browser. `intent: "login"` marks the call as
+   *  the start of a desktop login flow, so main routes the matching
+   *  auth/callback deep link back to this window's profile (Layer 1). */
+  openExternal: (url: string, options?: { intent?: "login" }) => Promise<void>;
   /** Download a file by URL through Electron's native download system.
    *  Shows a native save dialog. On non-desktop platforms this is undefined. */
   downloadURL: (url: string) => Promise<void>;

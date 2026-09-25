@@ -24,7 +24,6 @@ describe("AuthSessionCoordinator", () => {
     coordinator.reportMain("user-a");
     coordinator.registerIssueWindow("issue-1");
     coordinator.registerIssueWindow("issue-2");
-
     coordinator.reportMain("user-b");
 
     expect(close).toHaveBeenCalledTimes(2);
@@ -54,6 +53,32 @@ describe("AuthSessionCoordinator", () => {
 
     expect(close).toHaveBeenCalledTimes(2);
     expect(coordinator.isCurrentIssueSession("stale")).toBe(false);
+  });
+});
+
+describe("AuthSessionCoordinator per profile", () => {
+  it("a profile switch in one coordinator never closes another profile's issue windows", () => {
+    // One coordinator instance per desktop.json profile (2B.3): profile B's
+    // issue windows bind to profile B's account and survive profile A's
+    // logout / account switch.
+    const closeA = vi.fn();
+    const closeB = vi.fn();
+    const profileA = new AuthSessionCoordinator<string>(closeA);
+    const profileB = new AuthSessionCoordinator<string>(closeB);
+
+    profileA.reportMain("user-a");
+    profileB.reportMain("user-b");
+    profileB.registerIssueWindow("issue-b1");
+    // The issue window announces its own session, matching the main window's
+    // account — it is "current" from then on.
+    profileB.reportIssue("issue-b1", "user-b");
+
+    // Profile A switches accounts; a shared coordinator would close B's
+    // issue window through the shared mainUserId/issueUserIds state.
+    profileA.reportMain("user-a2");
+
+    expect(closeB).not.toHaveBeenCalled();
+    expect(profileB.isCurrentIssueSession("issue-b1")).toBe(true);
   });
 });
 

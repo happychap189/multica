@@ -7,6 +7,42 @@ import {
   TAB_SELECTION_SHORTCUT_CHANNEL,
 } from "./main-renderer-messages";
 
+describe("MainRendererMessageQueue per profile", () => {
+  it("never flushes one profile's pending messages from another profile's readiness", () => {
+    // One queue instance per desktop.json profile: profile B's main window
+    // announcing readiness must not drain profile A's queued payloads.
+    const queueA = new MainRendererMessageQueue();
+    const queueB = new MainRendererMessageQueue();
+    const sendA = vi.fn();
+    const sendB = vi.fn();
+
+    queueA.enqueue("auth:token", "token-for-a", sendA);
+    queueB.setReady("auth:token", true, sendB);
+    expect(sendA).not.toHaveBeenCalled();
+    expect(sendB).not.toHaveBeenCalled();
+
+    queueA.setReady("auth:token", true, sendA);
+    expect(sendA).toHaveBeenCalledWith("auth:token", "token-for-a");
+  });
+
+  it("keeps readiness in other profiles' queues across a profile's readiness reset", () => {
+    // The main process resets only the closing profile's queue; other
+    // profiles' main windows keep delivering immediately.
+    const queueA = new MainRendererMessageQueue();
+    const queueB = new MainRendererMessageQueue();
+    const sendA = vi.fn();
+    const sendB = vi.fn();
+
+    queueB.setReady("inbox:open", true, sendB);
+    queueA.resetReady();
+    queueB.enqueue("inbox:open", { itemId: "b-item" }, sendB);
+    expect(sendB).toHaveBeenCalledOnce();
+
+    queueA.enqueue("inbox:open", { itemId: "a-item" }, sendA);
+    expect(sendA).not.toHaveBeenCalled();
+  });
+});
+
 describe("MainRendererMessageQueue", () => {
   it("holds messages until their matching listener is ready", () => {
     const queue = new MainRendererMessageQueue();

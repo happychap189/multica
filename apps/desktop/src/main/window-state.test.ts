@@ -275,6 +275,26 @@ describe("windowStateFilePath", () => {
   it("joins userData with the canonical filename", () => {
     expect(windowStateFilePath("/tmp/user-data")).toBe(join("/tmp/user-data", WINDOW_STATE_FILENAME));
   });
+
+  it("keeps the legacy filename for the designated default profile", () => {
+    expect(windowStateFilePath("/tmp/user-data", "default", "default")).toBe(
+      join("/tmp/user-data", WINDOW_STATE_FILENAME),
+    );
+    // The designated default may be any id — zero migration follows the
+    // designation, not the literal id.
+    expect(windowStateFilePath("/tmp/user-data", "work", "work")).toBe(
+      join("/tmp/user-data", WINDOW_STATE_FILENAME),
+    );
+  });
+
+  it("gives other profiles their own window-state-<id>.json file", () => {
+    expect(windowStateFilePath("/tmp/user-data", "personal", "default")).toBe(
+      join("/tmp/user-data", "window-state-personal.json"),
+    );
+    expect(windowStateFilePath("/tmp/user-data", "personal", "work")).toBe(
+      join("/tmp/user-data", "window-state-personal.json"),
+    );
+  });
 });
 
 // Sanity: write + re-parse via the real JSON format used on disk.

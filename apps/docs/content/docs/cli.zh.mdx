@@ -214,6 +214,10 @@ multica config show
 multica config show --profile staging
 ```
 
+Profile 解析遵循固定链：先看 `--profile` flag，其次 `MULTICA_PROFILE` 环境变量，再次机器级指针文件 `~/.multica/current-profile`，最后是默认 profile。flag 优先级最高；在守护进程托管任务中环境变量与指针会被忽略。
+
+使用 `multica config set profile <name>` 为裸命令固定机器级默认；传入空值（`multica config set profile ""`）即可清除。该值必须是已存在的 profile，`config show` 会显示当前指针；每个命名 profile 拥有独立的工作区根目录（`~/multica_workspaces_<profile>`）和独立的 `multica login --profile <name>` 登录会话。以 `desktop-` 开头的名字属于 Multica 桌面端，CLI 的守护进程生命周期命令会拒绝它们。
+
 <Callout type="warning">
 CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓库、上传到日志或与他人共享。
 </Callout>

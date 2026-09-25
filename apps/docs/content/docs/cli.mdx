@@ -214,6 +214,10 @@ multica config show
 multica config show --profile staging
 ```
 
+Profile resolution follows a fixed chain: the `--profile` flag first, then the `MULTICA_PROFILE` environment variable, then the machine-level pointer file `~/.multica/current-profile`, then the default profile. The flag wins over everything, and the env var and pointer are ignored inside daemon-managed tasks.
+
+Pin a machine-level default for bare commands with `multica config set profile <name>`; pass an empty value (`multica config set profile ""`) to clear it. The value must name an existing profile, `config show` renders the current pointer, and each named profile owns its own workspaces root (`~/multica_workspaces_<profile>`) and its own `multica login --profile <name>` session. Names starting with `desktop-` belong to the Multica desktop app and are rejected for the CLI's daemon lifecycle commands.
+
 Do not set `MULTICA_DAEMON_PORT` in the host shell, Compose service, or container entrypoint that starts a daemon. The host daemon derives its health port from `--profile` and injects this variable into agent tasks itself. Remove the variable from older startup environments entirely: versions 0.4.22 and 0.4.23 otherwise mistake that shell for a managed task and reject login. Newer versions let guarded human login and `daemon status` recover when the port is the only task signal, but ordinary API and profile-resolving commands intentionally remain fail-closed until the variable is removed.
 
 When the CLI runs inside a daemon-managed agent task, it does not load or modify these human-owned profile files. Multica API commands authenticate with the task-scoped credential injected by the daemon. `config show` and `config set` use private task-local state; human/local commands such as `login`, `logout`, `setup`, `workspace switch`, local runtime profile path changes, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` are unavailable. `auth status` does not print token material in this context.

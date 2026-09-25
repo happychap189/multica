@@ -214,6 +214,10 @@ multica config show
 multica config show --profile staging
 ```
 
+プロファイルの解決は固定されたチェーンに従います: まず `--profile` フラグ、次に `MULTICA_PROFILE` 環境変数、次にマシンレベルのポインタファイル `~/.multica/current-profile`、最後にデフォルトプロファイルです。フラグが最も優先され、デーモン管理タスク内では環境変数とポインタは無視されます。
+
+`multica config set profile <name>` でフラグなしコマンド向けのマシンレベルのデフォルトを固定できます。空の値（`multica config set profile ""`）を渡すと解除されます。値には既存のプロファイルを指定する必要があり、`config show` は現在のポインタを表示します。名前付きプロファイルはそれぞれ専用のワークスペースルート（`~/multica_workspaces_<profile>`）と専用の `multica login --profile <name>` セッションを持ちます。`desktop-` で始まる名前は Multica デスクトップアプリが所有し、CLI のデーモンライフサイクルコマンドでは拒否されます。
+
 <Callout type="warning">
 CLI の設定ファイルには、あなたとして Multica にアクセスできるトークンが含まれます。リポジトリにコミットしたり、ログにアップロードしたり、他人と共有したりしないでください。
 </Callout>

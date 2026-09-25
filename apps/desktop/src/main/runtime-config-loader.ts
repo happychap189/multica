@@ -4,7 +4,6 @@ import { basename, dirname, join } from "path";
 import {
   DEFAULT_DESKTOP_CONFIG_REGISTRY,
   parseDesktopConfig,
-  resolveProfileRuntimeConfig,
   runtimeConfigFromDevEnv,
   singleProfileRegistry,
   type DesktopConfigRegistry,
@@ -81,22 +80,6 @@ export async function loadDesktopConfig(options: {
   }
 
   return { ok: true, registry: parsed.registry, migrated: parsed.migrated };
-}
-
-// Compatibility projection retained for the pre-registry IPC surface
-// (`runtime-config:get` still serves a single RuntimeConfig). Phase 2 rewires
-// the caller to loadDesktopConfig; remove this wrapper then.
-export async function loadRuntimeConfig(options: {
-  isDev: boolean;
-  env: RuntimeConfigEnv;
-  configPath?: string;
-}): Promise<RuntimeConfigResult> {
-  const result = await loadDesktopConfig(options);
-  if (!result.ok) return result;
-  return {
-    ok: true,
-    config: resolveProfileRuntimeConfig(result.registry, result.registry.defaultProfile),
-  };
 }
 
 export function desktopConfigPath(): string {

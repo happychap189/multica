@@ -35,8 +35,10 @@
  * restored — token and user — the API client's token is re-pointed at the
  * restored credential, and the window reloads so bootstrapping re-hydrates
  * from the restored storage. The reload is the accepted loss: in-flight issue
- * windows and the tab layout do not survive it (session teardown resets tabs
- * irreversibly). Note that even when a misdirected login pierces both layers,
+ * windows, the tab layout, and the workspace selection do not survive it
+ * (session teardown resets tabs and clears the workspace pointer
+ * irreversibly — the workspace is re-picked on the next navigation). Note
+ * that even when a misdirected login pierces both layers,
  * the local daemon is unaffected: it authenticates with its own PAT and
  * session expiry deliberately leaves it running (MUL-7028).
  *
@@ -52,9 +54,14 @@ const TOKEN_STORAGE_KEY = "multica_token";
 export const DEEP_LINK_ROLLBACK_NOTICE_KEY =
   "multica:deep-link-rollback-notice";
 
-/** Shown (Layer 2) when a login callback belongs to a different server. */
+/**
+ * Shown (Layer 2) when the server rejects the candidate token. Usually this
+ * means the callback belongs to a different server's window; it can also be
+ * a same-server link that has already expired, so the wording stays neutral
+ * instead of asserting cross-server delivery.
+ */
 export const WRONG_SERVER_NOTICE =
-  "This login link belongs to a different server. Switch to that server's window to finish signing in.";
+  "This sign-in link could not be used on this server. If it was started on another server's window, switch there and try again; otherwise, sign in again.";
 
 /** Shown (Layer 3, after the reload) when a login failed and state was rolled back. */
 export const ROLLBACK_NOTICE =

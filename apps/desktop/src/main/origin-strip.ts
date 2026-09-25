@@ -13,11 +13,10 @@ const originStrippedSessions = new WeakSet<Session>();
  * `persist:` partition, which is a fresh Session object — without this, only
  * the default session was covered and profile-B WS upgrades would be rejected.
  *
- * Installing per window is safe against Electron's additive webRequest
- * listeners: a second `onBeforeSendHeaders` call appends another identical
- * handler rather than swapping handlers, and two identical handlers are
- * idempotent (both remove the same header). The WeakSet guard still keeps
- * installation to exactly one listener per Session — windows sharing a
+ * Installing per window stays safe whatever Electron's webRequest listener
+ * semantics are (append or replace): the WeakSet guard keeps installation to
+ * exactly one listener per Session, and even without the guard the handler is
+ * idempotent (it always removes the same header). Windows sharing a
  * partition (main window + issue windows) share one Session object.
  */
 export function installOriginStrip(session: Session): void {

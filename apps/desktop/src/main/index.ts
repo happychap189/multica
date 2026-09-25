@@ -1075,6 +1075,9 @@ if (!gotTheLock) {
     // Unity launchers also respect `setBadgeCount`. Windows' taskbar overlay
     // needs a pre-rendered PNG and is deferred — the OS notification + the
     // in-app inbox sidebar cover the core UX there for now.
+    // KNOWN LIMITATION (multi-profile): every window sends absolute counts
+    // and the badge follows the last writer, so with two profiles online the
+    // badge oscillates with window focus instead of aggregating.
     ipcMain.on("badge:set", (_event, rawCount: number) => {
       const count = Math.max(0, Math.floor(rawCount));
       if (process.platform === "darwin") {

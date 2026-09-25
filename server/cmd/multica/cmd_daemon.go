@@ -492,6 +492,13 @@ func knownProfiles() ([]string, error) {
 // The default profile is never validated: it owns ~/.multica directly, has no
 // entry under profiles/, and is always legitimate.
 //
+// An explicit desktop- name is hard-rejected regardless of what is on disk:
+// the desktop app owns that namespace (apps/desktop/src/main/daemon-profile.ts
+// only ever touches desktop-* dirs), and without this guard `multica --profile
+// desktop-x daemon stop` would let the CLI kill the app's daemon. Explicit
+// read-only commands are not routed through this guard, so a power user can
+// still inspect a desktop profile with e.g. `--profile desktop-x config show`.
+//
 // Callers must invoke this AFTER their daemon-managed-task guard
 // (requireHumanLocalCommand, or daemonStatusHealthPort for status). Listing the
 // profiles root inside a task would disclose the Owner's profile names, which
@@ -499,6 +506,9 @@ func knownProfiles() ([]string, error) {
 func requireKnownProfile(profile string) error {
 	if profile == "" {
 		return nil
+	}
+	if strings.HasPrefix(profile, "desktop-") {
+		return fmt.Errorf("profile %q: profiles starting with 'desktop-' are managed by the Multica desktop app; use the app to control that daemon", profile)
 	}
 	exists, err := profileExists(profile)
 	if err != nil {

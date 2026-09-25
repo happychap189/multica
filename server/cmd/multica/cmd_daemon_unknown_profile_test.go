@@ -65,31 +65,31 @@ func TestRequireKnownProfile(t *testing.T) {
 	})
 
 	t.Run("existing profile passes", func(t *testing.T) {
-		mkProfiles(t, "dev", "desktop-api.multica.ai")
-		if err := requireKnownProfile("desktop-api.multica.ai"); err != nil {
+		mkProfiles(t, "dev", "api.multica.ai")
+		if err := requireKnownProfile("api.multica.ai"); err != nil {
 			t.Fatalf("requireKnownProfile = %v, want nil", err)
 		}
 	})
 
 	t.Run("unknown profile lists the known ones sorted", func(t *testing.T) {
-		mkProfiles(t, "prod", "dev", "desktop-api.multica.ai")
+		mkProfiles(t, "prod", "dev", "api.multica.ai")
 
-		err := requireKnownProfile("desktop-api.multica")
+		err := requireKnownProfile("api.multica")
 		var unknown *unknownProfileError
 		if !errors.As(err, &unknown) {
 			t.Fatalf("requireKnownProfile = %v, want *unknownProfileError", err)
 		}
-		if unknown.Profile != "desktop-api.multica" {
+		if unknown.Profile != "api.multica" {
 			t.Fatalf("Profile = %q, want the name the user passed", unknown.Profile)
 		}
-		want := []string{"desktop-api.multica.ai", "dev", "prod"}
+		want := []string{"api.multica.ai", "dev", "prod"}
 		if strings.Join(unknown.Known, ",") != strings.Join(want, ",") {
 			t.Fatalf("Known = %v, want %v (sorted)", unknown.Known, want)
 		}
 		msg := unknown.Error()
 		// The whole point of #6694: the message must name the typo AND the
 		// real profile, so the fix is visible without further digging.
-		if !strings.Contains(msg, `"desktop-api.multica"`) || !strings.Contains(msg, "desktop-api.multica.ai") {
+		if !strings.Contains(msg, `"api.multica"`) || !strings.Contains(msg, "api.multica.ai") {
 			t.Fatalf("error message %q must name both the bad profile and the known ones", msg)
 		}
 	})
@@ -154,10 +154,10 @@ func TestRequireKnownProfile(t *testing.T) {
 func TestDaemonStatusUnknownProfile(t *testing.T) {
 	t.Run("text mode fails without touching stdout", func(t *testing.T) {
 		clearDaemonTaskEnv(t)
-		mkProfiles(t, "desktop-api.multica.ai")
+		mkProfiles(t, "api.multica.ai")
 
 		out, err := captureStdout(t, func() error {
-			return runDaemonStatus(daemonStatusCmdFor(t, "desktop-api.multica", ""), nil)
+			return runDaemonStatus(daemonStatusCmdFor(t, "api.multica", ""), nil)
 		})
 		var unknown *unknownProfileError
 		if !errors.As(err, &unknown) {
@@ -170,10 +170,10 @@ func TestDaemonStatusUnknownProfile(t *testing.T) {
 
 	t.Run("json mode prints one document and exits non-zero", func(t *testing.T) {
 		clearDaemonTaskEnv(t)
-		mkProfiles(t, "desktop-api.multica.ai", "dev")
+		mkProfiles(t, "api.multica.ai", "dev")
 
 		out, err := captureStdout(t, func() error {
-			return runDaemonStatus(daemonStatusCmdFor(t, "desktop-api.multica", "json"), nil)
+			return runDaemonStatus(daemonStatusCmdFor(t, "api.multica", "json"), nil)
 		})
 		// errSilent keeps the stderr copy away while still exiting non-zero.
 		if !errors.Is(err, errSilent) {
@@ -194,10 +194,10 @@ func TestDaemonStatusUnknownProfile(t *testing.T) {
 		if payload.Status != "unknown_profile" {
 			t.Fatalf("status = %q, want unknown_profile", payload.Status)
 		}
-		if payload.Profile != "desktop-api.multica" {
+		if payload.Profile != "api.multica" {
 			t.Fatalf("profile = %q, want the name the user passed", payload.Profile)
 		}
-		want := []string{"desktop-api.multica.ai", "dev"}
+		want := []string{"api.multica.ai", "dev"}
 		if strings.Join(payload.KnownProfiles, ",") != strings.Join(want, ",") {
 			t.Fatalf("known_profiles = %v, want %v", payload.KnownProfiles, want)
 		}
@@ -305,9 +305,9 @@ func TestDaemonLifecycleCommandsRejectUnknownProfile(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clearDaemonTaskEnv(t)
-			mkProfiles(t, "desktop-api.multica.ai")
+			mkProfiles(t, "api.multica.ai")
 
-			cmd := daemonStatusCmdFor(t, "desktop-api.multica", "")
+			cmd := daemonStatusCmdFor(t, "api.multica", "")
 			cmd.Flags().Bool("follow", false, "")
 			cmd.Flags().Int("lines", 50, "")
 

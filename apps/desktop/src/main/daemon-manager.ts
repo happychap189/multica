@@ -1057,7 +1057,7 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   const args = ["daemon", "stop", ...profileArgs(active.name)];
 
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout: 15_000 }, (err) => {
+    execFile(bin, args, { timeout: 15_000, env: desktopSpawnEnv() }, (err) => {
       if (err) {
         resolve({ success: false, error: err.message });
       } else {

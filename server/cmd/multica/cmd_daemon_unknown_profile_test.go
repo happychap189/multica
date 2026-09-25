@@ -285,6 +285,9 @@ func TestDaemonStartRequiresKnownProfile(t *testing.T) {
 	if !errors.As(err, &unknown) {
 		t.Fatalf("runDaemonBackground = %v, want *unknownProfileError", err)
 	}
+	if !strings.Contains(unknown.Error(), "no named profiles exist yet") {
+		t.Fatalf("error %q should say no named profiles exist yet", unknown.Error())
+	}
 	if !strings.Contains(unknown.Error(), "multica login --profile brand-new-profile") {
 		t.Fatalf("error %q should point at the login fix", unknown.Error())
 	}
@@ -410,5 +413,41 @@ func TestRequireKnownProfileRejectsDesktopPrefixCaseInsensitively(t *testing.T) 
 	err := requireKnownProfile("Desktop-localhost")
 	if err == nil || !strings.Contains(err.Error(), "managed by the Multica desktop app") {
 		t.Fatalf("requireKnownProfile = %v, want desktop-ownership rejection", err)
+	}
+}
+
+// The desktop app drives its daemon through these same lifecycle subcommands
+// (daemon-manager.ts sets MULTICA_LAUNCHED_BY=desktop on start/probe-runtimes
+// invocations today), so an invocation carrying that marker is the app itself
+// and must pass the desktop- ownership guard. The existing rejection table
+// above runs WITHOUT the marker and stays authoritative for bare invocations.
+func TestRequireKnownProfileAllowsDesktopMarker(t *testing.T) {
+	mkProfiles(t, "desktop-x")
+	t.Setenv("MULTICA_LAUNCHED_BY", "desktop")
+
+	if err := requireKnownProfile("desktop-x"); err != nil {
+		t.Fatalf("requireKnownProfile = %v, want nil under the desktop marker", err)
+	}
+}
+
+// Start-path counterpart of the carve-out: with the marker set, runDaemon-
+// Background gets past the desktop- guard and fails later, at the ordinary
+// auth check, for the ordinary reason.
+func TestDaemonStartDesktopMarkerPassesGuard(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t, "desktop-x")
+	t.Setenv("MULTICA_LAUNCHED_BY", "desktop")
+
+	cmd := daemonStatusCmdFor(t, "desktop-x", "")
+	cmd.Flags().Bool("foreground", false, "")
+	err := runDaemonBackground(cmd)
+
+	// Past the guard, the {} config has no token, so the failure is the
+	// not-logged-in error — never the desktop ownership rejection.
+	if err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Fatalf("runDaemonBackground = %v, want the not-logged-in error past the desktop guard", err)
+	}
+	if strings.Contains(err.Error(), "desktop app") {
+		t.Fatalf("runDaemonBackground = %v, desktop guard must not fire under the marker", err)
 	}
 }

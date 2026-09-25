@@ -511,7 +511,18 @@ func requireKnownProfile(profile string) error {
 	// deriving profile dirs, and on case-insensitive filesystems (APFS
 	// default) "Desktop-localhost" resolves to the same directory as the
 	// app's own "desktop-localhost".
+	//
+	// The desktop app itself drives its daemon through these same lifecycle
+	// subcommands (its daemon-manager passes MULTICA_LAUNCHED_BY=desktop on
+	// start and probe-runtimes today), so an invocation carrying that marker
+	// is the app speaking for itself and passes the ownership guard. The
+	// threat model is accidental takeover by a bare human invocation, not
+	// same-user malice: a process that sets the marker itself is already
+	// running as the user.
 	if strings.HasPrefix(strings.ToLower(profile), "desktop-") {
+		if os.Getenv("MULTICA_LAUNCHED_BY") == "desktop" {
+			return nil
+		}
 		return fmt.Errorf("profile %q: profiles starting with 'desktop-' are managed by the Multica desktop app; use the app to control that daemon", profile)
 	}
 	exists, err := profileExists(profile)

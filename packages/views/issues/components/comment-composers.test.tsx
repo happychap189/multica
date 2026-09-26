@@ -6,6 +6,7 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { Attachment } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { createAuthStore, registerAuthStore } from "@multica/core/auth";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -45,6 +46,16 @@ const focusCalls = vi.hoisted(() => ({ focused: 0, blurred: 0 }));
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 const insertPlaceholderSpy = vi.hoisted(() => vi.fn());
 const insertMarkdownBehavior = vi.hoisted(() => ({ succeed: true }));
+// The composers mount useAgentSlashCommands, whose permission-context reader
+// requires the auth singleton; register a bare store (no API/storage behavior
+// needed here) the same way the hook's own suite does.
+registerAuthStore(
+  createAuthStore({
+    api: {} as never,
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  }),
+);
+
 // Lets a test drop the editor's uploading placeholder out of the document
 // (Cmd+Z after a paste) without settling the upload behind it.
 const editorUploadSignal = vi.hoisted(

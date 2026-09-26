@@ -1,4 +1,5 @@
 import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -13,6 +14,10 @@ import enEditor from "../../locales/en/editor.json";
 // mocking that call; it resolves a server Attachment row (makeUpload's extra
 // link/markdownLink fields are ignored by the engine, which re-derives them).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+// The agent-slash hook's mount effect reads the workspace list through the
+// Query cache; the api mock must know it so the query resolves instead of
+// erroring.
+const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 // Observability for the write-back insert path: a settle whose mount died
 // delivers into the live editor through this method.
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
@@ -23,7 +28,7 @@ const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
-  api: { uploadFile: mockApiUploadFile },
+  api: { uploadFile: mockApiUploadFile, listWorkspaces: mockApiListWorkspaces },
 }));
 
 function makeUpload(overrides: Partial<UploadResult> & { id: string; link: string; filename: string }): UploadResult {
@@ -359,21 +364,35 @@ beforeEach(() => {
   insertMarkdownSpy.mockReset();
 });
 
+// The composer mounts useAgentSlashCommands (React Query cache reader), so
+// every render needs a provider. `retry: false` keeps failed workspace-list
+// fetches from retrying past the test's lifetime.
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {ui}
+      </I18nProvider>
+    </QueryClientProvider>
+  );
+}
+
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
   const view = render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatInput onSend={onSend} uploadEnabled agentName="Multica" {...props} />
-    </I18nProvider>,
+    renderWithProviders(
+      <ChatInput onSend={onSend} uploadEnabled agentName="Multica" {...props} />,
+    ),
   );
   return { onSend, ...view };
 }
 
 function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
-  return (
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatInput onSend={vi.fn()} uploadEnabled agentName="Multica" {...props} />
-    </I18nProvider>
+  return renderWithProviders(
+    <ChatInput onSend={vi.fn()} uploadEnabled agentName="Multica" {...props} />,
   );
 }
 
@@ -471,26 +490,26 @@ describe("ChatInput new-chat draft identity", () => {
 describe("ChatInput focusRequest", () => {
   it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
     const { rerender } = render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={0} />
-      </I18nProvider>,
+      renderWithProviders(
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={0} />,
+      ),
     );
     // The inert initial value must not steal focus (e.g. a plain deep-link open).
     expect(editorState.focused).toBe(0);
 
     // Starting a new chat bumps the nonce — the compose box grabs focus.
     rerender(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={1} />
-      </I18nProvider>,
+      renderWithProviders(
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={1} />,
+      ),
     );
     expect(editorState.focused).toBe(1);
 
     // Each subsequent new chat re-focuses.
     rerender(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={2} />
-      </I18nProvider>,
+      renderWithProviders(
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={2} />,
+      ),
     );
     expect(editorState.focused).toBe(2);
   });
@@ -550,6 +569,36 @@ describe("ChatInput @ context wiring", () => {
 
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
+// The `/` menu's A∪C catalog flows through the agentCommandMenu prop; the mock
+// editor records it, so asserting presence + member shape pins the wiring the
+// same way the quickActionMenu MUL-5588 regression guard does on comments.
+describe("ChatInput slash menu wiring", () => {
+  function recordedAgentCommandMenu() {
+    return editorProps.last?.agentCommandMenu as
+      | {
+          getAgentCommandGroups: (ids: string[]) => unknown[];
+          retryRuntimeSkills: (runtimeId: string) => void;
+        }
+      | undefined;
+  }
+
+  it("passes the agent command menu (getter + retry) to the editor", () => {
+    renderInput();
+
+    const menu = recordedAgentCommandMenu();
+    expect(menu).toBeTruthy();
+    expect(typeof menu?.getAgentCommandGroups).toBe("function");
+    expect(typeof menu?.retryRuntimeSkills).toBe("function");
+  });
+
+  it("keeps the skill slash mode active with the menu wired", () => {
+    renderInput();
+
+    expect(editorProps.last?.enableSlashCommands).toBe(true);
+    expect(editorProps.last?.slashCommandMode).toBeUndefined();
   });
 });
 

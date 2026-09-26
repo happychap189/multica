@@ -19,6 +19,7 @@ import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { useAgentSlashCommands } from "../hooks/use-agent-slash-commands";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
@@ -51,6 +52,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // Quick actions in the `/` menu: picking one inserts the server-rendered
   // body so the user can edit before sending, instead of firing immediately.
   const quickActionMenu = useQuickActionMenu(issueId);
+  // Agent command groups in the `/` menu once the draft @-mentions an agent.
+  // Same insert-don't-run plain-text contract as the quick actions above.
+  const agentCommandMenu = useAgentSlashCommands();
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -270,6 +274,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           enableSlashCommands
           slashCommandMode="command"
           quickActionMenu={quickActionMenu}
+          agentCommandMenu={agentCommandMenu}
         />
       </div>
       )}

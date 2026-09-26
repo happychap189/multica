@@ -85,6 +85,10 @@
   "slash_command": {
     "no_skills_configured": "No skills configured",
     "no_results": "No matching skills",
+    "runtime_skills_unavailable": "Runtime skills unavailable",
+    "retry_runtime_skills": "Retry",
+    "runtime_skills_pending": "Loading…",
+    "command_source_help": "Commands mirror the agent's Skills page. Near-identical names from different sources are not merged.",
     "commands": {
       "note": "Add a note — won't trigger any agents"
     }

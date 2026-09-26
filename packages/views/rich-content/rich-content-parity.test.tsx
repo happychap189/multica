@@ -501,3 +501,37 @@ describe("semantic parity beyond Mermaid", () => {
     expect(mermaidRenderMock).not.toHaveBeenCalled();
   });
 });
+
+// AC-8 of the agent slash-command picker: the picker inserts a plain-text
+// `/label ` command into the comment body, so the read-only renderer must
+// keep it literal text — never linkified, never turned into a mention chip.
+describe("agent slash command text renders literally", () => {
+  const COMMAND = "/oh-my-claudecode:deep-interview";
+  const BODY = `[@S7 Agent](mention://agent/33333333-3333-4333-8333-333333333333) ${COMMAND} review this`;
+
+  it("keeps a comment /key as literal text next to a real mention chip", () => {
+    const { container } = render(<ReadonlyContent content={BODY} attachments={[]} />);
+
+    // The mention markup still renders as a chip…
+    const mention = container.querySelector("span.mention");
+    expect(mention).not.toBeNull();
+    expect(mention?.textContent).toBe("@S7 Agent");
+    // …while the command itself renders as plain text, untouched.
+    expect(container.textContent).toContain(`${COMMAND} review this`);
+    // No anchor (or other interactive wrapper) swallows the command text.
+    for (const anchor of Array.from(container.querySelectorAll("a"))) {
+      expect(anchor.textContent).not.toContain(COMMAND);
+    }
+    // The command text lives outside the mention chip, not inside it.
+    expect(mention?.textContent).not.toContain(COMMAND);
+  });
+
+  it("keeps a bare /key without mention markup literal too", () => {
+    const { container } = render(
+      <ReadonlyContent content={`${COMMAND} alone`} attachments={[]} />,
+    );
+    expect(container.textContent).toContain(`${COMMAND} alone`);
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("span.mention")).toBeNull();
+  });
+});

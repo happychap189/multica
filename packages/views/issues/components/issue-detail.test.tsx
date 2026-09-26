@@ -100,6 +100,12 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces"],
     queryFn: () => Promise.resolve([{ id: "ws-1", name: "Test WS", slug: "test" }]),
   }),
+  // useAgentSlashCommands (mounted by the composers) reads the agents/members
+  // caches through these keys.
+  workspaceKeys: {
+    agents: (wsId: string) => ["workspaces", wsId, "agents"],
+    members: (wsId: string) => ["workspaces", wsId, "members"],
+  },
 }));
 
 // Mock @multica/core/paths — after the URL-driven workspace refactor,

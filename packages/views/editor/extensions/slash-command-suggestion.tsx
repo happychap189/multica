@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   forwardRef,
   useCallback,
   useEffect,
@@ -10,9 +11,11 @@ import {
 } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { SuggestionOptions } from "@tiptap/suggestion";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { PluginKey } from "@tiptap/pm/state";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import type { AgentCommandGroup } from "@multica/core/agents";
 import { getCurrentWsId } from "@multica/core/platform";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isImeComposing } from "@multica/core/utils";
@@ -27,11 +30,15 @@ import {
   pickerNavigationDirection,
 } from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
+import { matchesPinyin } from "./pinyin-match";
 
 const MAX_ITEMS = 20;
 
 /** Known built-in command ids — the keys under editor `slash_command.commands`. */
 export type BuiltinCommandKey = "note";
+
+/** Marks a menu entry as contributed by an agent command group. */
+export const AGENT_COMMAND_ITEM_PREFIX = "agent-command:";
 
 export interface SlashCommandItem {
   id: string;
@@ -44,6 +51,19 @@ export interface SlashCommandItem {
    * so the visible string stays localized (the typed `/label` does not).
    */
   descriptionKey?: BuiltinCommandKey;
+  /**
+   * Set on entries contributed by an agent command group (issue comments and
+   * chat): the agent whose mounted/runtime skills produced this entry, so the
+   * list can draw a header when the group changes. Built-ins and quick
+   * actions never carry it — its absence is what keeps those menus exactly as
+   * they were before this change.
+   */
+  group?: {
+    agentName: string;
+    degraded: boolean;
+    pending: boolean;
+    runtimeId: string;
+  };
 }
 
 interface SlashCommandListProps {
@@ -58,6 +78,12 @@ interface SlashCommandListProps {
    * "no skills configured".
    */
   hideOnEmpty?: boolean;
+  /**
+   * Retry trigger for degraded agent command groups (comment composer and
+   * chat). The control lives in the group header row, outside the navigable
+   * items, so passing it never changes keyboard semantics.
+   */
+  onRetryRuntimeSkills?: (runtimeId: string) => void;
 }
 
 export interface SlashCommandListRef {
@@ -67,7 +93,10 @@ export interface SlashCommandListRef {
 export const SlashCommandList = forwardRef<
   SlashCommandListRef,
   SlashCommandListProps
->(function SlashCommandList({ items, query, command, hideOnEmpty = false }, ref) {
+>(function SlashCommandList(
+  { items, query, command, hideOnEmpty = false, onRetryRuntimeSkills },
+  ref,
+) {
   const { t } = useT("editor");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -140,12 +169,26 @@ export const SlashCommandList = forwardRef<
     <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto">
       {items.map((item, index) => {
         const description = describe(item);
+        // Group headers render when the group reference changes between
+        // adjacent items; the composition (buildAgentGroupMenuItems) shares
+        // one metadata object per group, so reference equality is exact.
+        // Headers are non-interactive rows between the flat item buttons —
+        // itemRefs/selectedIndex never count them, so keyboard nav is
+        // unchanged.
+        const groupStart =
+          item.group && items[index - 1]?.group !== item.group;
         return (
-          <button
-            key={item.id}
-            ref={(el) => {
-              itemRefs.current[index] = el;
-            }}
+          <Fragment key={item.id}>
+            {groupStart && item.group && (
+              <AgentGroupHeader
+                group={item.group}
+                onRetryRuntimeSkills={onRetryRuntimeSkills}
+              />
+            )}
+            <button
+              ref={(el) => {
+                itemRefs.current[index] = el;
+              }}
             className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-caption transition-colors ${
               selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
             }`}
@@ -157,44 +200,72 @@ export const SlashCommandList = forwardRef<
                 {description}
               </span>
             )}
-          </button>
+            </button>
+          </Fragment>
         );
       })}
     </div>
   );
 });
 
-const NO_MATCH = 4;
-
-/** Returns the match tier: exact name, prefix, substring, then description. */
-function skillMatchRank(
-  skill: { name: string; description?: string },
-  q: string,
-): number {
-  const name = skill.name.toLowerCase();
-  if (name === q) return 0;
-  if (name.startsWith(q)) return 1;
-  if (name.includes(q)) return 2;
-  if ((skill.description ?? "").toLowerCase().includes(q)) return 3;
-  return NO_MATCH;
+/**
+ * Non-interactive header row for an agent command group: the agent name plus
+ * the group's state. Pending shows a light loading note; degraded shows the
+ * unavailable notice plus an inline retry control. The retry button lives in
+ * the header row, not an item, so it cannot shift keyboard navigation, and
+ * its click is stopped from bubbling as an item pick.
+ */
+function AgentGroupHeader({
+  group,
+  onRetryRuntimeSkills,
+}: {
+  group: NonNullable<SlashCommandItem["group"]>;
+  onRetryRuntimeSkills?: (runtimeId: string) => void;
+}) {
+  const { t } = useT("editor");
+  return (
+    <div
+      className="flex items-center justify-between gap-2 px-3 pt-2 pb-1 text-caption text-muted-foreground"
+      title={t(($) => $.slash_command.command_source_help)}
+    >
+      <span className="min-w-0 truncate font-medium">{group.agentName}</span>
+      {group.pending && (
+        <span aria-live="polite">
+          {t(($) => $.slash_command.runtime_skills_pending)}
+        </span>
+      )}
+      {group.degraded && !group.pending && (
+        <span className="flex shrink-0 items-center gap-1">
+          <span>{t(($) => $.slash_command.runtime_skills_unavailable)}</span>
+          <button
+            type="button"
+            aria-label={t(($) => $.slash_command.retry_runtime_skills)}
+            className="shrink-0 rounded p-0.5 text-caption underline hover:bg-accent"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetryRuntimeSkills?.(group.runtimeId);
+            }}
+          >
+            {t(($) => $.slash_command.retry_runtime_skills)}
+          </button>
+        </span>
+      )}
+    </div>
+  );
 }
 
-/** Ranks matches by relevance while preserving configured order within each tier. */
-function rankSkillMatches<T extends { name: string; description?: string }>(
-  skills: T[],
-  q: string,
-): T[] {
-  if (!q) return skills;
-  return skills
-    .map((skill) => ({ skill, rank: skillMatchRank(skill, q) }))
-    .filter((entry) => entry.rank !== NO_MATCH)
-    .sort((a, b) => a.rank - b.rank)
-    .map((entry) => entry.skill);
-}
-
-function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
+/**
+ * Resolves the agent whose command catalog the chat `/` menu lists: the
+ * chat-selected agent, falling back to the first available one. Availability
+ * matches the pre-catalog chat picker exactly — not archived and invocable by
+ * the current viewer (`canAssignAgentToIssue`) — and reads the Query caches
+ * directly, because Tiptap calls suggestion items outside React render. The
+ * getter (useAgentSlashCommands) applies the stricter catalog gate on top, so
+ * a selection that is not runtime-bound simply yields an empty menu.
+ */
+function resolveChatSlashAgent(qc: QueryClient): Agent | null {
   const wsId = getCurrentWsId();
-  if (!wsId) return [];
+  if (!wsId) return null;
 
   const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
   const members: MemberWithUser[] =
@@ -210,30 +281,47 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
       !a.archived_at &&
       canAssignAgentToIssue(a, { userId, role: memberRole }).allowed,
   );
-  const activeAgent =
+  return (
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
-    null;
-
-  const q = query.toLowerCase();
-  return rankSkillMatches(activeAgent?.skills ?? [], q)
-    .slice(0, MAX_ITEMS)
-    .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
+    null
+  );
 }
 
-export function createSlashCommandSuggestion(qc: QueryClient): Omit<
-  SuggestionOptions<SlashCommandItem>,
-  "editor"
-> {
+export interface SlashCommandSuggestionOptions {
+  /**
+   * Agent command groups behind the chat `/` menu (mounted + runtime skills,
+   * joined by the core catalog). Resolved for the chat-selected agent — the
+   * items callback passes that single id. Absent, the menu is empty and
+   * renders the standard "no skills configured" state.
+   */
+  getAgentCommandGroups?: (agentIds: string[]) => AgentCommandGroup[];
+  /** Fired by a degraded group header's retry control (see useAgentSlashCommands). */
+  onRetryRuntimeSkills?: (runtimeId: string) => void;
+}
+
+export function createSlashCommandSuggestion(
+  qc: QueryClient,
+  options: SlashCommandSuggestionOptions = {},
+): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
   const pluginKey = new PluginKey("slashCommandSuggestion");
 
   return {
     char: "/",
     pluginKey,
     // Only open over a `/` the user actually typed, so a pasted path
-    // (`/usr/local/bin`) never opens the skill picker (MUL-5429).
+    // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildItems(qc, query),
+    items: ({ query }) => {
+      const getGroups = options.getAgentCommandGroups;
+      if (!getGroups) return [];
+      const agent = resolveChatSlashAgent(qc);
+      if (!agent) return [];
+      // Chat has no built-ins ahead of the group, so the truncation budget is
+      // the whole menu; group headers, degraded, pending, and retry all render
+      // through the same SlashCommandList machinery the comment composer uses.
+      return buildAgentGroupMenuItems(getGroups([agent.id]), query, 0);
+    },
     command: ({ editor, range, props }) => {
       const nodeAfter = editor.view.state.selection.$to.nodeAfter;
       const overrideSpace = nodeAfter?.text?.startsWith(" ");
@@ -241,20 +329,16 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
         range.to += 1;
       }
 
+      // Plain text `/label ` — byte-identical to hand-typing and to the
+      // comment composer's agent command insertion. The trailing space
+      // terminates the suggestion match so the menu does not re-open and
+      // leaves the caret at the parameter position; the label is inserted
+      // verbatim, including `plugin:` prefixes. The slashCommand rich node
+      // stays registered only to render history — new picks never create one.
       editor
         .chain()
         .focus()
-        .insertContentAt(range, [
-          {
-            type: "slashCommand",
-            attrs: {
-              id: props.id,
-              label: props.label,
-              mentionSuggestionChar: "/",
-            },
-          },
-          { type: "text", text: " " },
-        ])
+        .insertContentAt(range, [{ type: "text", text: `/${props.label} ` }])
         .run();
 
       window.getSelection()?.collapseToEnd();
@@ -266,6 +350,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
         items: props.items,
         query: props.query,
         command: props.command,
+        onRetryRuntimeSkills: options.onRetryRuntimeSkills,
       }),
       onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
     }),
@@ -278,9 +363,9 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
 
 /**
  * Built-in slash commands offered in the issue comment composer. Unlike the
- * chat `/` picker (which lists the active agent's skills), these are a fixed,
- * hand-curated set. Currently only `/note`, which marks a comment as a
- * human-only note that won't trigger the assigned agent — mirrors the backend
+ * chat `/` picker (which lists the active agent's command catalog), these are
+ * a fixed, hand-curated set. Currently only `/note`, which marks a comment as
+ * a human-only note that won't trigger the assigned agent — mirrors the backend
  * `noteCommentPrefix` in server/internal/handler/comment.go.
  */
 export const BUILTIN_COMMANDS: SlashCommandItem[] = [
@@ -318,6 +403,140 @@ export function buildBuiltinCommandItems(
     .slice(0, MAX_ITEMS);
 }
 
+/**
+ * Scan the document for mentioned-agent ids, in document order, deduped. The
+ * items callback runs outside React (same reason the chat picker reads the
+ * stores directly), so it scans the doc directly instead of subscribing to
+ * draft state.
+ */
+export function mentionedAgentIdsFromDoc(
+  doc: ProseMirrorNode | undefined | null,
+): string[] {
+  const ids: string[] = [];
+  doc?.descendants((node) => {
+    if (node.type.name !== "mention" || node.attrs.type !== "agent") return;
+    const id = node.attrs.id;
+    if (typeof id === "string" && id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
+
+// The agentCommandMatchRank ladder over label/description, then a pinyin tier
+// below raw-text matches —
+// the mention menu matches pinyin on name and description
+// (mention-suggestion.tsx matchesMentionQuery), so a Chinese skill
+// description must be findable by pinyin here too.
+const PINYIN_MATCH = 4;
+const AGENT_COMMAND_NO_MATCH = 5;
+
+/** Match tiers for an agent command entry: the skillMatchRank ladder over
+ *  the label, then description, then pinyin on either. */
+function agentCommandMatchRank(
+  entry: { label: string; description?: string },
+  q: string,
+): number {
+  const label = entry.label.toLowerCase();
+  if (label === q) return 0;
+  if (label.startsWith(q)) return 1;
+  if (label.includes(q)) return 2;
+  if ((entry.description ?? "").toLowerCase().includes(q)) return 3;
+  if (
+    matchesPinyin(entry.label, q) ||
+    (entry.description ? matchesPinyin(entry.description, q) : false)
+  ) {
+    return PINYIN_MATCH;
+  }
+  return AGENT_COMMAND_NO_MATCH;
+}
+
+/**
+ * Same shape as rankSkillMatches: filter + tier-sort that preserves
+ * configured order within a tier.
+ */
+function rankAgentCommandEntries<T extends { label: string; description?: string }>(
+  entries: T[],
+  q: string,
+): T[] {
+  if (!q) return entries;
+  return entries
+    .map((entry) => ({ entry, rank: agentCommandMatchRank(entry, q) }))
+    .filter((e) => e.rank !== AGENT_COMMAND_NO_MATCH)
+    .sort((a, b) => a.rank - b.rank)
+    .map((e) => e.entry);
+}
+
+/**
+ * Menu entries for the agent command groups, appended after the built-ins.
+ *
+ * Truncation is a budget, not a hard cap (MAX_ITEMS): pass 1 guarantees every
+ * group's top-ranked entry a slot even when the quick-action list is full —
+ * which can push the total past the budget — and pass 2 fills the remaining
+ * budget (MAX_ITEMS minus built-ins minus guarantees, floored at 0)
+ * round-robin across the groups in group order, one entry per group per
+ * round, until the budget or the groups are exhausted. No second-mentioned
+ * agent's group can be starved. Built-ins keep their own internal slice;
+ * with no agent mentions the menu never reaches this function.
+ */
+export function buildAgentGroupMenuItems(
+  groups: AgentCommandGroup[],
+  query: string,
+  builtinCount: number,
+): SlashCommandItem[] {
+  const q = query.toLowerCase();
+  const filtered = groups
+    .map((group) => ({
+      group,
+      items: rankAgentCommandEntries(group.items, q),
+    }))
+    // A group whose entries all fail the query drops out entirely — its
+    // header disappears with it rather than floating above another group's
+    // items.
+    .filter((g) => g.items.length > 0);
+
+  // Map the ranked entries to menu items up front; truncation below only
+  // decides HOW MANY survive per group. One shared metadata object per group
+  // — the list detects a header boundary by reference equality between
+  // adjacent items.
+  const perGroup: SlashCommandItem[][] = filtered.map(({ group, items }) => {
+    // One metadata object SHARED by every item of the group: the list
+    // detects a header boundary by reference equality between adjacent
+    // items, so per-item literals would draw a header before each entry.
+    const meta = {
+      agentName: group.agentName,
+      degraded: group.degraded,
+      pending: group.pending ?? false,
+      runtimeId: group.runtimeId,
+    };
+    return items.map((entry) => ({
+      id: `${AGENT_COMMAND_ITEM_PREFIX}${group.agentId}:${entry.id}`,
+      label: entry.label,
+      description: entry.description ?? "",
+      group: meta,
+    }));
+  });
+
+  // Pass 1 — every surviving group's top-ranked entry is guaranteed a slot,
+  // even when the built-in list is full (so the total may exceed MAX_ITEMS).
+  // Pass 2 — the remaining budget (MAX_ITEMS minus built-ins minus one per
+  // group, floored at 0) fills the groups round-robin in group order, one
+  // entry per group per round, until budget or groups are exhausted.
+  const kept: SlashCommandItem[][] = perGroup.map((items) => items.slice(0, 1));
+  const queues: SlashCommandItem[][] = perGroup.map((items) => items.slice(1));
+  let budget = Math.max(0, MAX_ITEMS - builtinCount - perGroup.length);
+  while (budget > 0) {
+    let anyTaken = false;
+    for (let i = 0; i < queues.length && budget > 0; i++) {
+      const next = queues[i]?.shift();
+      if (!next) continue; // group exhausted
+      kept[i]?.push(next);
+      budget -= 1;
+      anyTaken = true;
+    }
+    if (!anyTaken) break; // every group exhausted
+  }
+  return kept.flat();
+}
+
 export interface BuiltinCommandSuggestionOptions {
   /**
    * Configured quick actions offered alongside the built-ins. Read lazily on
@@ -338,6 +557,29 @@ export interface BuiltinCommandSuggestionOptions {
    * this into a toast. Without it a failed pick is completely silent.
    */
   onRenderError?: (error: unknown) => void;
+  /**
+   * Agent command groups for the `/` menu. Called with the agent ids the
+   * document mentions (comment composer) or the chat-selected agent id
+   * (chat); groups render after the built-ins under per-agent headers.
+   * Absent (a composer that opts out) the menu is byte-identical to the
+   * pre-grouping behavior.
+   */
+  getAgentCommandGroups?: (mentionedAgentIds: string[]) => AgentCommandGroup[];
+  /**
+   * Fired by a degraded group header's retry control; re-runs the runtime
+   * skill enumeration for that runtime.
+   */
+  onRetryRuntimeSkills?: (runtimeId: string) => void;
+}
+
+/**
+ * What ContentEditor takes as `agentCommandMenu` and hands to
+ * createBuiltinCommandSuggestion — the same two members, non-optional, so a
+ * wired composer cannot forget one.
+ */
+export interface AgentCommandMenuOptions {
+  getAgentCommandGroups: (mentionedAgentIds: string[]) => AgentCommandGroup[];
+  retryRuntimeSkills: (runtimeId: string) => void;
 }
 
 export function createBuiltinCommandSuggestion(
@@ -351,7 +593,21 @@ export function createBuiltinCommandSuggestion(
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
+    items: ({ editor, query }) => {
+      // Built-ins first, exactly as before; grouping only ever APPENDS.
+      const builtins = buildBuiltinCommandItems(
+        query,
+        options.getQuickActions?.() ?? [],
+      );
+      const getGroups = options.getAgentCommandGroups;
+      if (!getGroups) return builtins;
+      const mentioned = mentionedAgentIdsFromDoc(editor?.state?.doc);
+      if (mentioned.length === 0) return builtins;
+      return [
+        ...builtins,
+        ...buildAgentGroupMenuItems(getGroups(mentioned), query, builtins.length),
+      ];
+    },
     command: ({ editor, range, props }) => {
       if (isQuickActionItem(props)) {
         const render = options.renderQuickAction;
@@ -408,6 +664,9 @@ export function createBuiltinCommandSuggestion(
       // so a menu selection and a hand-typed command are byte-identical and the
       // backend can detect the marker with a simple prefix match. The trailing
       // space terminates the suggestion match so the menu does not re-open.
+      // Agent command entries (item.group set) land here too: the label is
+      // inserted verbatim — including `plugin:` prefixes — and the trailing
+      // space leaves the caret at the parameter position.
       editor
         .chain()
         .focus()
@@ -424,6 +683,7 @@ export function createBuiltinCommandSuggestion(
         query: props.query,
         command: props.command,
         hideOnEmpty: true,
+        onRetryRuntimeSkills: options.onRetryRuntimeSkills,
       }),
       onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
     }),

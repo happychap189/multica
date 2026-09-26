@@ -122,6 +122,10 @@
   "slash_command": {
     "no_skills_configured": "구성된 스킬 없음",
     "no_results": "일치하는 스킬 없음",
+    "runtime_skills_unavailable": "런타임 스킬을 사용할 수 없습니다",
+    "retry_runtime_skills": "재시도",
+    "runtime_skills_pending": "불러오는 중…",
+    "command_source_help": "명령은 에이전트의 Skills 페이지를 따릅니다. 출처가 다른 유사한 이름의 명령은 병합되지 않습니다.",
     "commands": {
       "note": "메모 추가 — 에이전트를 트리거하지 않음"
     }

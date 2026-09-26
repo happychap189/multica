@@ -56,7 +56,10 @@ import {
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
-import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
+import type {
+  BuiltinCommandSuggestionOptions,
+  AgentCommandMenuOptions,
+} from "./extensions/slash-command-suggestion";
 import { createEditorExtensions } from "./extensions";
 import {
   uploadAndInsertFile,
@@ -194,8 +197,8 @@ interface ContentEditorBaseProps {
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
-   * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * lists the selected agent's command catalog (chat); "command" shows the
+   * fixed built-in command menu (issue comments), e.g. /note.
    */
   slashCommandMode?: "skill" | "command";
   /**
@@ -204,6 +207,15 @@ interface ContentEditorBaseProps {
    * functions so a newly created action appears without remounting the editor.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
+  /**
+   * Agent command groups behind the agent `/` menu (issue comments AND chat):
+   * in the comment composer the menu appends a mentioned agent's
+   * mounted/runtime commands under a per-agent header after the built-ins; in
+   * chat the menu lists the selected agent's catalog for the whole menu. Read
+   * through a ref like quickActionMenu so the mount-frozen extension array
+   * always sees live data.
+   */
+  agentCommandMenu?: AgentCommandMenuOptions;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -379,6 +391,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       enableSlashCommands = false,
       slashCommandMode = "skill",
       quickActionMenu,
+      agentCommandMenu,
       attachments,
       flushPendingOnUnmount = false,
       onReady,
@@ -409,6 +422,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
     const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
+    // Same mount-freeze reasoning as quickActionMenuRef: the extension set is
+    // built once at mount, so the getter wrapper below reads the ref on every
+    // keystroke instead of capturing the prop object.
+    const agentCommandMenuRef = useRef<AgentCommandMenuOptions | undefined>(undefined);
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
@@ -510,6 +527,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     quickActionMenuRef.current = quickActionMenu;
+    agentCommandMenuRef.current = agentCommandMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
@@ -618,6 +636,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
           onRenderError: (error: unknown) =>
             quickActionMenuRef.current?.onRenderError?.(error),
+        },
+        agentCommandMenu: {
+          getAgentCommandGroups: (mentionedAgentIds: string[]) =>
+            agentCommandMenuRef.current?.getAgentCommandGroups?.(mentionedAgentIds) ?? [],
+          retryRuntimeSkills: (runtimeId: string) =>
+            agentCommandMenuRef.current?.retryRuntimeSkills?.(runtimeId),
         },
         resolveIssueIdentifierRef,
       }),

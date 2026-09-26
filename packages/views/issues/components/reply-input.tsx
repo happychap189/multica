@@ -21,6 +21,7 @@ import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { useAgentSlashCommands } from "../hooks/use-agent-slash-commands";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,6 +82,9 @@ function ReplyInput({
   // behavior as the top-level composer. A reply posts to the same issue, so
   // `/` has to offer the same thing here (MUL-5588).
   const quickActionMenu = useQuickActionMenu(issueId);
+  // Agent command groups in the `/` menu — same catalog, same header states
+  // and same insert-don't-run contract as the top-level composer above.
+  const agentCommandMenu = useAgentSlashCommands();
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -283,6 +287,7 @@ function ReplyInput({
             enableSlashCommands
             slashCommandMode="command"
             quickActionMenu={quickActionMenu}
+            agentCommandMenu={agentCommandMenu}
           />
         </div>
         )}

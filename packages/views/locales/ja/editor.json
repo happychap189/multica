@@ -122,6 +122,10 @@
   "slash_command": {
     "no_skills_configured": "設定済みスキルなし",
     "no_results": "一致するスキルなし",
+    "runtime_skills_unavailable": "ランタイムスキルを利用できません",
+    "retry_runtime_skills": "再試行",
+    "runtime_skills_pending": "読み込み中…",
+    "command_source_help": "コマンドはエージェントの Skills ページの内容に依存します。ソースが異なる類似名のコマンドは統合されません。",
     "commands": {
       "note": "メモを追加 — エージェントをトリガーしません"
     }

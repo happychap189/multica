@@ -85,6 +85,10 @@
   "slash_command": {
     "no_skills_configured": "Aucun skill configuré",
     "no_results": "Aucun skill correspondant",
+    "runtime_skills_unavailable": "Compétences du runtime indisponibles",
+    "retry_runtime_skills": "Réessayer",
+    "runtime_skills_pending": "Chargement…",
+    "command_source_help": "Les commandes reflètent la page Skills de l'agent. Les noms quasi identiques de sources différentes ne sont pas fusionnés.",
     "commands": {
       "note": "Ajouter une note — ne déclenchera aucun agent"
     }

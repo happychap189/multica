@@ -1,6 +1,6 @@
-import { act, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
@@ -23,6 +23,10 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+afterEach(() => {
+  cleanup();
+});
+
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
 }));
@@ -37,6 +41,24 @@ vi.mock("@multica/core/chat", () => ({
   useChatStore: { getState: () => chatState },
 }));
 
+// Only the render-closure test mounts the popup component, and it does so
+// through ReactRenderer; stubbing it captures the exact props object getProps
+// produced without mounting a real component tree (which would need the I18n
+// provider ReactRenderer cannot see).
+const rendererProps = vi.hoisted(() => ({
+  captured: [] as Array<Record<string, unknown>>,
+}));
+vi.mock("@tiptap/react", () => ({
+  ReactRenderer: class {
+    element = document.createElement("div");
+    constructor(_component: unknown, options: { props: Record<string, unknown> }) {
+      rendererProps.captured.push(options.props);
+    }
+    updateProps() {}
+    destroy() {}
+  },
+}));
+
 import {
   SlashCommandList,
   type SlashCommandListRef,
@@ -45,8 +67,11 @@ import {
   buildBuiltinCommandItems,
   BUILTIN_COMMANDS,
   createBuiltinCommandSuggestion,
+  mentionedAgentIdsFromDoc,
+  buildAgentGroupMenuItems,
   QUICK_ACTION_ITEM_PREFIX,
 } from "./slash-command-suggestion";
+import { buildAgentCommandCatalog, type AgentCommandEntry, type AgentCommandGroup } from "@multica/core/agents";
 
 function agent(overrides: Partial<Agent>): Agent {
   return {
@@ -88,8 +113,12 @@ function fakeQc(data: {
   } as unknown as QueryClient;
 }
 
-function items(qc: QueryClient, query = ""): SlashCommandItem[] {
-  const config = createSlashCommandSuggestion(qc);
+function items(
+  qc: QueryClient,
+  query = "",
+  options: Parameters<typeof createSlashCommandSuggestion>[1] = {},
+): SlashCommandItem[] {
+  const config = createSlashCommandSuggestion(qc, options);
   return config.items!({
     query,
     editor: {} as never,
@@ -97,233 +126,67 @@ function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   }) as SlashCommandItem[];
 }
 
-describe("slash command suggestion items", () => {
-  it("returns all active agent skills when query is empty", () => {
+const noopGetter = () => [];
+
+describe("chat `/` menu — catalog items", () => {
+  it("calls the catalog getter with the chat-selected agent id and lists its commands under group metadata", () => {
     chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Review code" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc).map((i) => i.label)).toEqual(["deploy", "review"]);
-  });
-
-  it("filters skills by name case-insensitively", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "Deploy", description: "" },
-            { id: "s2", name: "Review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "dep").map((i) => i.id)).toEqual(["s1"]);
-  });
-
-  it("filters skills by description", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Read a pull request" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "pull").map((i) => i.id)).toEqual(["s2"]);
-  });
-
-  it("ranks name prefix matches above description-only matches", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "grilling", description: "Grill the user about a plan" },
-            { id: "s2", name: "prototype", description: "Build a throwaway prototype" },
-            { id: "s3", name: "wayfinder", description: "Plan a huge chunk of work" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "wa").map((i) => i.id)).toEqual(["s3", "s2"]);
-  });
-
-  it("ranks an exact name match ahead of a longer prefix match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "reviewer", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "review").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("ranks a name prefix above a mid-name match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "pr-review", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "rev").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("keeps the configured skill order within a match tier", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy-web", description: "" },
-            { id: "s2", name: "deploy-api", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "deploy").map((i) => i.id)).toEqual(["s1", "s2"]);
-  });
-
-  it("keeps a name match inside the 20-item cap when description hits fill it", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            ...Array.from({ length: 25 }, (_, i) => ({
-              id: `d${i}`,
-              name: `skill-${i}`,
-              description: "Build a throwaway prototype",
-            })),
-            { id: "s-named", name: "wayfinder", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    const result = items(qc, "wa");
-    expect(result).toHaveLength(20);
-    expect(result[0]?.id).toBe("s-named");
-  });
-
-  it("tolerates skills with missing descriptions from cached API data", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy" } as Agent["skills"][number],
-          ],
-        }),
-      ],
-    });
-
-    expect(() => items(qc, "dep")).not.toThrow();
-    expect(items(qc, "dep")).toEqual([
-      { id: "s1", label: "deploy", description: "" },
+    const getGroups = vi.fn(() => [
+      agentGroupFixture({
+        items: [agentEntry("deploy", "Ship changes"), agentEntry("review")],
+      }),
     ]);
-  });
-
-  it("returns empty when the active agent has no skills", () => {
-    chatState.selectedAgentId = "agent-1";
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [agent({ id: "agent-1", skills: [] })],
+      agents: [agent({ id: "agent-1" })],
     });
 
-    expect(items(qc)).toEqual([]);
-  });
-
-  it("caps results at 20", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: Array.from({ length: 25 }, (_, i) => ({
-            id: `s${i}`,
-            name: `skill-${i}`,
-            description: "",
-          })),
-        }),
-      ],
-    });
-
-    expect(items(qc)).toHaveLength(20);
+    expect(items(qc, "", { getAgentCommandGroups: getGroups })).toEqual([
+      {
+        id: "agent-command:agent-1:deploy",
+        label: "deploy",
+        description: "Ship changes",
+        group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+      },
+      {
+        id: "agent-command:agent-1:review",
+        label: "review",
+        description: "",
+        group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+      },
+    ]);
+    expect(getGroups).toHaveBeenCalledWith(["agent-1"]);
   });
 
   it("falls back to the first available agent when selectedAgentId is stale", () => {
     chatState.selectedAgentId = "missing";
+    const getGroups = vi.fn(() => [
+      agentGroupFixture({ items: [agentEntry("deploy")] }),
+    ]);
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [{ id: "s1", name: "deploy", description: "" }],
-        }),
-      ],
+      agents: [agent({ id: "agent-1" })],
     });
 
-    expect(items(qc).map((i) => i.id)).toEqual(["s1"]);
+    items(qc, "", { getAgentCommandGroups: getGroups });
+    expect(getGroups).toHaveBeenCalledWith(["agent-1"]);
   });
 
-  it("returns empty when no agents exist", () => {
+  it("returns empty (and never calls the getter) when no agents exist", () => {
+    chatState.selectedAgentId = "agent-1";
+    const getGroups = vi.fn();
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
       agents: [],
     });
 
-    expect(items(qc)).toEqual([]);
+    expect(items(qc, "", { getAgentCommandGroups: getGroups })).toEqual([]);
+    expect(getGroups).not.toHaveBeenCalled();
   });
 
-  it("excludes skills from private agents the user cannot access", () => {
+  it("excludes a private agent the viewer cannot access", () => {
     chatState.selectedAgentId = "private-agent";
+    const getGroups = vi.fn();
     const qc = fakeQc({
       members: [
         { user_id: "u1", name: "Alice", role: "member" },
@@ -341,7 +204,116 @@ describe("slash command suggestion items", () => {
       ],
     });
 
+    expect(items(qc, "", { getAgentCommandGroups: getGroups })).toEqual([]);
+    expect(getGroups).not.toHaveBeenCalled();
+  });
+
+  it("returns empty when the getter option is absent", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+
     expect(items(qc)).toEqual([]);
+  });
+
+  it("filters group entries by query, keeping group metadata", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+    const getGroups = () => [
+      agentGroupFixture({
+        items: [agentEntry("deploy-web"), agentEntry("review-pr")],
+      }),
+    ];
+
+    const result = items(qc, "dep", { getAgentCommandGroups: getGroups });
+    expect(result.map((i) => i.label)).toEqual(["deploy-web"]);
+    expect(result[0]?.group?.agentName).toBe("Atlas");
+  });
+
+  it("truncates a single group at the 20-item menu budget (builtinCount 0)", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+    const getGroups = () => [
+      agentGroupFixture({
+        items: Array.from({ length: 25 }, (_, i) =>
+          agentEntry("cmd-" + String(i).padStart(2, "0")),
+        ),
+      }),
+    ];
+
+    const result = items(qc, "", { getAgentCommandGroups: getGroups });
+    expect(result).toHaveLength(20);
+    expect(result[0]?.label).toBe("cmd-00");
+    expect(result[19]?.label).toBe("cmd-19");
+  });
+
+  it("keeps plugin-prefixed labels verbatim", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+    const getGroups = () => [
+      agentGroupFixture({ items: [agentEntry("oh-my-claudecode:deep-interview")] }),
+    ];
+
+    expect(items(qc, "", { getAgentCommandGroups: getGroups })[0]?.label).toBe(
+      "oh-my-claudecode:deep-interview",
+    );
+  });
+
+  it("passes degraded group metadata through to the items", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+
+    const result = items(qc, "", { getAgentCommandGroups: () => [
+      agentGroupFixture({ degraded: true, items: [agentEntry("ship")] }),
+    ] });
+    expect(result[0]?.group).toEqual({
+      agentName: "Atlas",
+      degraded: true,
+      pending: false,
+      runtimeId: "runtime-1",
+    });
+  });
+
+  it("passes pending group metadata through to the items", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+
+    const result = items(qc, "", { getAgentCommandGroups: () => [
+      agentGroupFixture({ pending: true, items: [agentEntry("triage")] }),
+    ] });
+    expect(result[0]?.group).toEqual({
+      agentName: "Atlas",
+      degraded: false,
+      pending: true,
+      runtimeId: "runtime-1",
+    });
+  });
+
+  it("returns empty when the selected agent qualifies but the getter resolves nothing", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ id: "agent-1" })],
+    });
+
+    expect(items(qc, "", { getAgentCommandGroups: noopGetter })).toEqual([]);
   });
 });
 
@@ -709,5 +681,597 @@ describe("builtin `/` menu — async quick action rendering", () => {
     });
 
     expect(calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent command groups (issue-comment `/` menu) — S3/S4/S5/S6
+// ---------------------------------------------------------------------------
+
+/** Runtime entry fixture; label defaults to the key itself. */
+function agentEntry(id: string, description?: string): AgentCommandEntry {
+  return { id, label: id, description, source: "runtime" };
+}
+
+/** Group fixture with per-test overrides. */
+function agentGroupFixture(overrides: {
+  id?: string;
+  name?: string;
+  runtimeId?: string;
+  degraded?: boolean;
+  pending?: boolean;
+  items?: AgentCommandEntry[];
+} = {}): AgentCommandGroup {
+  const {
+    id = "agent-1",
+    name = "Atlas",
+    runtimeId = "runtime-1",
+    degraded = false,
+    pending = false,
+    items = [],
+  } = overrides;
+  return {
+    agentId: id,
+    agentName: name,
+    runtimeId,
+    degraded,
+    pending,
+    items,
+  };
+}
+
+/** Minimal doc stand-in exposing only what mentionedAgentIdsFromDoc walks. */
+function fakeDoc(ids: Array<{ type?: string; id: string }>) {
+  return {
+    descendants: (cb: (node: unknown) => boolean | void) => {
+      for (const { type, id } of ids) {
+        cb({
+          type: { name: type === undefined ? "mention" : type },
+          attrs: { type: type === undefined ? "agent" : type, id },
+        });
+      }
+    },
+  };
+}
+
+function fakeGroupEditor(doc: unknown) {
+  return { state: { doc } } as never;
+}
+
+function builtinItems(
+  suggestion: ReturnType<typeof createBuiltinCommandSuggestion>,
+  editor: never,
+  query = "",
+): SlashCommandItem[] {
+  return suggestion.items!({
+    query,
+    editor,
+    signal: new AbortController().signal,
+  }) as SlashCommandItem[];
+}
+
+describe("mentionedAgentIdsFromDoc", () => {
+  it("collects agent mention ids in document order, deduped", () => {
+    expect(
+      mentionedAgentIdsFromDoc(fakeDoc([{ id: "a2" }, { id: "a1" }, { id: "a2" }]) as never),
+    ).toEqual(["a2", "a1"]);
+  });
+
+  it("ignores member/issue mentions and non-mention nodes", () => {
+    expect(
+      mentionedAgentIdsFromDoc(fakeDoc([{ type: "member", id: "u9" }, { type: "issue", id: "i1" }]) as never),
+    ).toEqual([]);
+  });
+
+  it("tolerates a missing doc", () => {
+    expect(mentionedAgentIdsFromDoc(undefined)).toEqual([]);
+  });
+});
+
+describe("builtin `/` menu — agent group composition", () => {
+  it("returns built-ins unchanged when the doc mentions no agent", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: noopGetter,
+    });
+    const editor = fakeGroupEditor(fakeDoc([]));
+    expect(builtinItems(suggestion, editor)).toEqual(buildBuiltinCommandItems(""));
+  });
+});
+
+describe("builtin `/` menu — group composition (AC-1 no-getter)", () => {
+  it("returns built-ins unchanged when the getter option is absent, even with mentions", () => {
+    const suggestion = createBuiltinCommandSuggestion({});
+    const editor = fakeGroupEditor(fakeDoc([{ id: "agent-1" }]));
+    expect(builtinItems(suggestion, editor)).toEqual(buildBuiltinCommandItems(""));
+  });
+
+  it("returns only built-ins when the getter resolves nothing for a mentioned id", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "ghost" }]));
+    expect(builtinItems(suggestion, editor)).toEqual(buildBuiltinCommandItems(""));
+  });
+});
+
+describe("builtin `/` menu — group metadata and ordering", () => {
+  it("appends one group after the built-ins, carrying group metadata", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [
+        agentGroupFixture({
+          items: [agentEntry("review-pr", "Review a pull request"), agentEntry("deploy")],
+        }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "agent-1" }]));
+
+    expect(builtinItems(suggestion, editor)).toEqual([
+      { id: "note", label: "note", descriptionKey: "note" },
+      {
+        id: "agent-command:agent-1:review-pr",
+        label: "review-pr",
+        description: "Review a pull request",
+        group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+      },
+      {
+        id: "agent-command:agent-1:deploy",
+        label: "deploy",
+        description: "",
+        group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+      },
+    ]);
+  });
+
+  it("appends both mentioned agents' groups in order", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [
+        agentGroupFixture({ id: "a1", name: "Atlas", items: [agentEntry("ship")] }),
+        agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: [agentEntry("triage")] }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "a1" }, { id: "a2" }]));
+
+    const result = builtinItems(suggestion, editor);
+    expect(result.map((i) => i.label)).toEqual(["note", "ship", "triage"]);
+    expect(result.map((i) => i.group?.agentName)).toEqual([undefined, "Atlas", "Vega"]);
+  });
+});
+
+describe("builtin `/` menu — group filtering (S5)", () => {
+  it("filters within a group without touching other groups", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [
+        agentGroupFixture({
+          id: "a1",
+          name: "Atlas",
+          items: [agentEntry("deploy-web"), agentEntry("review-pr")],
+        }),
+        agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: [agentEntry("gamma")] }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "a1" }, { id: "a2" }]));
+
+    // Atlas has no "gam" match and drops out entirely; Vega keeps gamma.
+    // (The note built-in drops out too: builtin labels match by prefix only.)
+    const result = builtinItems(suggestion, editor, "gam");
+    expect(result.map((i) => i.label)).toEqual(["gamma"]);
+    expect(result[0]?.group?.agentName).toBe("Vega");
+  });
+
+  it("matches a Chinese description by pinyin query", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [
+        agentGroupFixture({
+          items: [agentEntry("review", "代码审查"), agentEntry("unrelated")],
+        }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "agent-1" }]));
+
+    expect(builtinItems(suggestion, editor, "daima").map((i) => i.label)).toEqual(["review"]);
+  });
+});
+
+describe("builtin `/` menu — note avoidance through the real catalog", () => {
+  it("never surfaces a note-normalized label in the composed items", () => {
+    // The core catalog drops entries whose label normalizes to the reserved
+    // /note command; this pins the whole chain at the items level.
+    const groups = buildAgentCommandCatalog({
+      agents: [
+        {
+          ...agent({ id: "agent-1", runtime_id: "runtime-1", skills: [{ id: "s-note", name: "NOTE", description: "" }] }),
+          runtime_bound: true,
+        } as Agent,
+      ],
+      runtimeSkillsByRuntime: new Map([
+        ["runtime-1", [{ key: "note", name: "Note", source_path: "/s", provider: "claude", file_count: 1 }]],
+      ]),
+    });
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => groups,
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "agent-1" }]));
+
+    // Both sources contribute a note-normalized entry; both are dropped, so
+    // the built-in note command is the only note in the composed items.
+    expect(builtinItems(suggestion, editor).map((i) => i.label)).toEqual(["note"]);
+  });
+
+  it("keeps `plugin:` prefixed labels verbatim in the items", () => {
+    const suggestion = createBuiltinCommandSuggestion({
+      getAgentCommandGroups: () => [
+        agentGroupFixture({ items: [agentEntry("oh-my-claudecode:deep-interview")] }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "agent-1" }]));
+
+    expect(builtinItems(suggestion, editor)[1]?.label).toBe("oh-my-claudecode:deep-interview");
+  });
+});
+
+describe("builtin `/` menu — agent group truncation (budget, not hard cap)", () => {
+  function manyEntries(n: number): AgentCommandEntry[] {
+    return Array.from({ length: n }, (_, i) => agentEntry(`cmd-${String(i).padStart(2, "0")}`));
+  }
+
+  it("guarantees each group one item when 20 quick actions fill the budget", () => {
+    const quickActions = Array.from({ length: 20 }, (_, i) => ({ id: `qa-${i}`, name: `action-${i}` }));
+    const suggestion = createBuiltinCommandSuggestion({
+      getQuickActions: () => quickActions,
+      getAgentCommandGroups: () => [
+        agentGroupFixture({ id: "a1", items: manyEntries(10) }),
+        agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: manyEntries(10) }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "a1" }, { id: "a2" }]));
+
+    // 20 builtins + 1 guaranteed entry per group = 22 (budget exceeded by design).
+    const result = builtinItems(suggestion, editor);
+    expect(result).toHaveLength(22);
+    const atlas = result.filter((i) => i.group?.agentName === "Atlas");
+    const vega = result.filter((i) => i.group?.agentName === "Vega");
+    expect(atlas).toHaveLength(1);
+    expect(vega).toHaveLength(1);
+    // The guaranteed entry is the group's top-ranked one.
+    expect(atlas[0]?.label).toBe("cmd-00");
+    expect(vega[0]?.label).toBe("cmd-00");
+  });
+
+  it("fills groups round-robin within the remaining budget", () => {
+    const quickActions = Array.from({ length: 3 }, (_, i) => ({ id: `qa-${i}`, name: `action-${i}` }));
+    const suggestion = createBuiltinCommandSuggestion({
+      getQuickActions: () => quickActions,
+      getAgentCommandGroups: () => [
+        agentGroupFixture({ id: "a1", items: manyEntries(15) }),
+        agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: manyEntries(15) }),
+      ],
+    });
+    const editor = fakeGroupEditor(fakeDoc([{ id: "a1" }, { id: "a2" }]));
+
+    // budget = 20 - 4 builtins (3 quick actions + note) - 2 guarantees = 14
+    // -> 7 full rounds of (Atlas, Vega); per-group rank order survives.
+    const result = builtinItems(suggestion, editor);
+    expect(result).toHaveLength(20);
+    const atlas = result.filter((i) => i.group?.agentName === "Atlas");
+    const vega = result.filter((i) => i.group?.agentName === "Vega");
+    expect(atlas).toHaveLength(8);
+    expect(vega).toHaveLength(8);
+    expect(atlas[0]?.label).toBe("cmd-00");
+    expect(atlas[7]?.label).toBe("cmd-07");
+    expect(vega[7]?.label).toBe("cmd-07");
+  });
+});
+
+describe("SlashCommandList group header rendering", () => {
+  const queryCommand = vi.fn();
+
+  function groupItemsFixture() {
+    return buildAgentGroupMenuItems(
+      [
+        agentGroupFixture({ id: "a1", items: [agentEntry("ship"), agentEntry("sail")] }),
+        agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: [agentEntry("triage")] }),
+      ],
+      "",
+      1, // one built-in (the note command) ahead of the groups
+    );
+  }
+
+  it("renders a header at each group boundary, without adding focusable stops", () => {
+    const { getByText } = render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={[...buildBuiltinCommandItems(""), ...groupItemsFixture()]}
+          query=""
+          command={queryCommand}
+          hideOnEmpty
+          onRetryRuntimeSkills={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    expect(getByText("Atlas")).toBeInTheDocument();
+    expect(getByText("Vega")).toBeInTheDocument();
+    // Headers are plain rows: the only buttons remain the navigable items
+    // (1 built-in + 3 group entries).
+    expect(document.querySelectorAll("button")).toHaveLength(4);
+  });
+
+  it("renders the degraded notice plus retry control; retry fires with runtimeId", async () => {
+    const onRetry = vi.fn();
+    const { getByText } = render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={buildAgentGroupMenuItems(
+            [agentGroupFixture({ degraded: true, items: [agentEntry("ship")] })],
+            "",
+            0,
+          )}
+          query=""
+          command={queryCommand}
+          hideOnEmpty
+          onRetryRuntimeSkills={onRetry}
+        />
+      </I18nWrapper>,
+    );
+
+    expect(getByText("Runtime skills unavailable")).toBeInTheDocument();
+    act(() => {
+      fireEvent.click(getByText("Retry"));
+    });
+    expect(onRetry).toHaveBeenCalledWith("runtime-1");
+    // Clicking retry must not select an item.
+    expect(queryCommand).not.toHaveBeenCalled();
+  });
+
+  it("renders the pending loading state instead of the degraded control", () => {
+    const { getByText, queryByText } = render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={buildAgentGroupMenuItems(
+            [agentGroupFixture({ pending: true, items: [agentEntry("ship")] })],
+            "",
+            0,
+          )}
+          query=""
+          command={queryCommand}
+          hideOnEmpty
+          onRetryRuntimeSkills={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    expect(getByText("Loading…")).toBeInTheDocument();
+    expect(queryByText("Retry")).not.toBeInTheDocument();
+  });
+});
+
+describe("SlashCommandList group keyboard + IME", () => {
+  function groupItemsFixture() {
+    return [
+      ...buildBuiltinCommandItems(""),
+      ...buildAgentGroupMenuItems(
+        [
+          agentGroupFixture({ id: "a1", items: [agentEntry("ship"), agentEntry("sail")] }),
+          agentGroupFixture({ id: "a2", name: "Vega", runtimeId: "runtime-2", items: [agentEntry("triage")] }),
+        ],
+        "",
+        1,
+      ),
+    ];
+  }
+
+  it("cycles across group boundaries; headers are not stops; Enter accepts a group item", () => {
+    const command = vi.fn();
+    const ref = createRef<SlashCommandListRef>();
+    const items = groupItemsFixture();
+    render(
+      <I18nWrapper>
+        <SlashCommandList ref={ref} items={items} query="" command={command} hideOnEmpty />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) => {
+      let handled: boolean | undefined;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+      return handled;
+    };
+
+    expect(press({ key: "ArrowDown" })).toBe(true);
+    const highlighted = () =>
+      Array.from(document.querySelectorAll("button")).find((b) => b.classList.contains("bg-accent"))
+        ?.textContent ?? "";
+    // index 0 -> 1: crossed the built-in -> Atlas boundary (no header stop).
+    expect(highlighted()).toContain("/ship");
+    expect(press({ key: "ArrowDown" })).toBe(true); // -> sail (within Atlas)
+    expect(highlighted()).toContain("/sail");
+    expect(press({ key: "ArrowDown" })).toBe(true); // -> triage (crossed into Vega)
+    expect(highlighted()).toContain("/triage");
+    expect(press({ key: "Enter" })).toBe(true);
+    expect(command).toHaveBeenCalledWith(items[3]);
+  });
+
+  it("accepts a group item on plain Tab", () => {
+    const command = vi.fn();
+    const ref = createRef<SlashCommandListRef>();
+    const items = groupItemsFixture();
+    render(
+      <I18nWrapper>
+        <SlashCommandList ref={ref} items={items} query="" command={command} hideOnEmpty />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) => {
+      let handled: boolean | undefined;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+      return handled;
+    };
+    press({ key: "ArrowDown" });
+    expect(press({ key: "Tab" })).toBe(true);
+  });
+
+  it("lets IME-composed keys pass through without accepting", () => {
+    const command = vi.fn();
+    const ref = createRef<SlashCommandListRef>();
+    render(
+      <I18nWrapper>
+        <SlashCommandList ref={ref} items={groupItemsFixture()} query="" command={command} hideOnEmpty />
+      </I18nWrapper>,
+    );
+
+    const imeEnter = new KeyboardEvent("keydown", { key: "Enter", isComposing: true });
+    expect(ref.current?.onKeyDown({ event: imeEnter })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+
+    // Safari's composition commit can clear isComposing before keydown.
+    const safariCommit = new KeyboardEvent("keydown", { key: "Enter" });
+    Object.defineProperty(safariCommit, "keyCode", { value: 229 });
+    expect(ref.current?.onKeyDown({ event: safariCommit })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+  });
+});
+
+describe("builtin `/` menu — agent command insertion (S4)", () => {
+  function recordingEditor() {
+    const calls: { from: number; to: number; content: unknown }[] = [];
+    const chain = {
+      focus: () => chain,
+      insertContentAt: (_range: { from: number; to: number }, content: unknown) => {
+        calls.push({ from: _range.from, to: _range.to, content });
+        return chain;
+      },
+      run: () => true,
+    };
+    return {
+      calls,
+      editor: { chain: () => chain, state: { doc: { textBetween: () => "" } }, view: { state: { selection: { $to: { nodeAfter: null } } } } } as never,
+    };
+  }
+
+  function groupItem(label: string, description?: string): SlashCommandItem {
+    return {
+      id: `agent-command:agent-1:${label}`,
+      label,
+      description: description ?? "",
+      group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+    };
+  }
+
+  it("inserts plain `/label ` text for a group item, caret at the param position", () => {
+    const { calls, editor } = recordingEditor();
+    const collapseToEnd = vi.fn();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ collapseToEnd } as unknown as Selection);
+
+    const suggestion = createBuiltinCommandSuggestion({});
+    suggestion.command!({ editor, range: { from: 0, to: 5 }, props: groupItem("ship") } as never);
+
+    expect(calls).toEqual([
+      { from: 0, to: 5, content: [{ type: "text", text: "/ship " }] },
+    ]);
+    expect(collapseToEnd).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("inserts a long plugin-prefixed label verbatim", () => {
+    const { calls, editor } = recordingEditor();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ collapseToEnd: vi.fn() } as unknown as Selection);
+
+    const suggestion = createBuiltinCommandSuggestion({});
+    suggestion.command!({ editor, range: { from: 0, to: 30 }, props: groupItem("oh-my-claudecode:deep-interview") } as never);
+
+    expect(calls[0]?.content).toEqual([{ type: "text", text: "/oh-my-claudecode:deep-interview " }]);
+    spy.mockRestore();
+  });
+
+  it("ignores the description when inserting", () => {
+    const { calls, editor } = recordingEditor();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ collapseToEnd: vi.fn() } as unknown as Selection);
+
+    const suggestion = createBuiltinCommandSuggestion({});
+    suggestion.command!({ editor, range: { from: 0, to: 6 }, props: groupItem("ship", "Ship the change") } as never);
+
+    expect(calls[0]?.content).toEqual([{ type: "text", text: "/ship " }]);
+    spy.mockRestore();
+  });
+});
+
+describe("chat `/` menu — plain-text insertion", () => {
+  function chatRecordingEditor() {
+    const calls: { from: number; to: number; content: unknown }[] = [];
+    const chain = {
+      focus: () => chain,
+      insertContentAt: (_range: { from: number; to: number }, content: unknown) => {
+        calls.push({ from: _range.from, to: _range.to, content });
+        return chain;
+      },
+      run: () => true,
+    };
+    return {
+      calls,
+      editor: { chain: () => chain, state: { doc: { textBetween: () => "" } }, view: { state: { selection: { $to: { nodeAfter: null } } } } } as never,
+    };
+  }
+
+  function chatGroupItem(label: string): SlashCommandItem {
+    return {
+      id: "agent-command:agent-1:" + label,
+      label,
+      description: "",
+      group: { agentName: "Atlas", degraded: false, pending: false, runtimeId: "runtime-1" },
+    };
+  }
+
+  it("inserts plain `/label ` text instead of a rich node, caret at the param position", () => {
+    const { calls, editor } = chatRecordingEditor();
+    const collapseToEnd = vi.fn();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ collapseToEnd } as unknown as Selection);
+
+    const config = createSlashCommandSuggestion(fakeQc({}), { getAgentCommandGroups: noopGetter });
+    config.command!({ editor, range: { from: 0, to: 1 }, props: chatGroupItem("ship") } as never);
+
+    expect(calls).toEqual([
+      { from: 0, to: 1, content: [{ type: "text", text: "/ship " }] },
+    ]);
+    expect(collapseToEnd).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("inserts a long plugin-prefixed label verbatim", () => {
+    const { calls, editor } = chatRecordingEditor();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ collapseToEnd: vi.fn() } as unknown as Selection);
+
+    const config = createSlashCommandSuggestion(fakeQc({}), { getAgentCommandGroups: noopGetter });
+    config.command!({ editor, range: { from: 0, to: 33 }, props: chatGroupItem("oh-my-claudecode:deep-interview") } as never);
+
+    expect(calls[0]?.content).toEqual([
+      { type: "text", text: "/oh-my-claudecode:deep-interview " },
+    ]);
+    spy.mockRestore();
+  });
+});
+
+describe("chat `/` menu — render props", () => {
+  it("passes onRetryRuntimeSkills to the list component through the render props", () => {
+    const onRetry = vi.fn();
+    const config = createSlashCommandSuggestion(fakeQc({}), {
+      getAgentCommandGroups: noopGetter,
+      onRetryRuntimeSkills: onRetry,
+    });
+
+    const renderers = (config.render as unknown as () => {
+      onStart: (props: { editor: unknown; clientRect: null }) => void;
+      onExit: () => void;
+    })();
+    renderers.onStart({
+      editor: { view: { dom: document.createElement("div") } },
+      clientRect: null,
+    });
+    expect(rendererProps.captured).toEqual([
+      expect.objectContaining({ onRetryRuntimeSkills: onRetry }),
+    ]);
+    renderers.onExit();
   });
 });

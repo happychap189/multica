@@ -48,6 +48,10 @@ const mockSetContent = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
+  // useAgentSlashCommands → useCurrentWorkspace reads the workspace list; the
+  // composer mounts it even though this suite never exercises the slash menu.
+  useQuery: () => ({ data: undefined }),
+  queryOptions: (options: unknown) => options,
 }));
 // Captures what ContentEditor wires into its extensions. `onSubmitRef` is the
 // Mod+Enter path — it bypasses the SubmitButton entirely, which is why the

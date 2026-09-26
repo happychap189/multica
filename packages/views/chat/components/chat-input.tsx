@@ -29,6 +29,7 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import { useAgentSlashCommands } from "../../issues/hooks/use-agent-slash-commands";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
@@ -176,6 +177,10 @@ export function ChatInput({
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
+  // The `/` menu's A∪C command catalog (mounted + runtime skills) for the
+  // chat-selected agent. Cross-feature import (issues/hooks) matches the
+  // existing chat → issues/components edges (canAssignAgent, property pickers).
+  const agentCommandMenu = useAgentSlashCommands();
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -706,6 +711,7 @@ export function ChatInput({
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
             enableSlashCommands
+            agentCommandMenu={agentCommandMenu}
             // The bubble menu carries the only affordance that can strip
             // formatting — "Normal text" (setParagraph) plus the mark/list
             // toggles. Once a `# ` input rule or a Markdown/HTML paste turns a

@@ -2,6 +2,7 @@
 
 > 本包在官方 multica 后端上可直接运行：不修改服务端、不含任何凭据。导入内容 = 1 个 skill（aidlc-relay-methodology）+ 14 个智能体 + 5 支 phase 小队。
 > 方法论文档见包内 aidlc-relay-pack/（SKILL.md 总览、relay-protocol.md 人工接力协议、5 支小队的编排指令、33 份 stage 契约）。
+> 导入完成后，团队成员从 `docs/72-aidlc-relay-usage-guide.md` 读起。
 
 ## 0. 包内容
 
@@ -12,6 +13,7 @@
 | seed-aidlc-relay.sh | 幂等导入脚本（同名 agent 更新；squad 按"精确名 + aidlc-relay:v1 标记"解析，不重复创建） |
 | SHA256SUMS | 包内容清单校验和；打包前断言 stage 契约 33/33 且 slug 集合与 refs 派生集一致、协议文件与小队指令齐备 |
 | README.md | 本文件 |
+| docs/72-aidlc-relay-usage-guide.md | 团队成员使用教程，导入后从这份读起 |
 
 ## 1. 前置条件
 

@@ -9,6 +9,7 @@ PACK="$HERE/aidlc-relay-pack"
 ROSTER="$HERE/aidlc-relay-roster.json"
 SEED="$HERE/seed-aidlc-relay.sh"
 README="$HERE/aidlc-relay-pack-export-README.md"
+DOC72="$HERE/../72-aidlc-relay-usage-guide.md"
 OUT_DIR="${AIDLC_EXPORT_DIR:-$HERE}"
 VERSION="${AIDLC_RELAY_VERSION:-v1}"
 OUT_ZIP="$OUT_DIR/aidlc-relay-export-$VERSION.zip"
@@ -18,6 +19,7 @@ OUT_ZIP="$OUT_DIR/aidlc-relay-export-$VERSION.zip"
 [ -f "$ROSTER" ] || { echo "ERROR: roster missing: $ROSTER"; exit 1; }
 [ -f "$SEED" ] || { echo "ERROR: seed script missing: $SEED"; exit 1; }
 [ -f "$README" ] || { echo "ERROR: README missing: $README"; exit 1; }
+[ -f "$DOC72" ] || { echo "ERROR: usage guide missing: $DOC72"; exit 1; }
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq required"; exit 1; }
 command -v zip >/dev/null 2>&1 || { echo "ERROR: zip binary required"; exit 1; }
@@ -56,6 +58,7 @@ cp -R "$PACK" "$S/aidlc-relay-pack"
 cp "$ROSTER" "$S/aidlc-relay-roster.json"
 cp "$SEED" "$S/seed-aidlc-relay.sh"
 cp "$README" "$S/README.md"
+mkdir -p "$S/docs" && cp "$DOC72" "$S/docs/"
 
 # manifest over staged content (sorted, LC_ALL=C)
 (

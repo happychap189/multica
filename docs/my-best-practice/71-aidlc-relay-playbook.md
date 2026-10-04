@@ -304,6 +304,7 @@ W5 重导入幂等（同日）：同服务器第二 workspace 全新导入，以
 
 ## 71.10 阅读顺序建议
 
+- 团队成员日常使用：先读 [72 号使用教程](72-aidlc-relay-usage-guide.md)（随导出包分发，导入后从这份读起）。
 - 只想跑起来：71.2.1 → 71.2.2 → 71.2.3 → [README](templates/aidlc-relay-pack-export-README.md) → 跑冒烟（71.3.2）。
 - 想理解协议：[SKILL.md](templates/aidlc-relay-pack/SKILL.md) → [relay-protocol.md](templates/aidlc-relay-pack/relay-protocol.md) → 本文 71.5/71.6/71.9。
 - 想复现验证：71.3 全节 → 71.4 口径 → 71.8 未验证项声明。

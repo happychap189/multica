@@ -1,19 +1,22 @@
 # aidlc relay 方法论包 — 导入指南
 
-> 本包在官方 multica 后端上可直接运行：不修改服务端、不含任何凭据。导入内容 = 1 个 skill（aidlc-relay-methodology）+ 14 个智能体 + 5 支 phase 小队。
+> 本包在官方 multica 后端上可直接运行：不修改服务端、不含任何凭据。导入内容 = 1 个 skill（aidlc-relay-methodology）+ 15 个智能体 + 16 支小队（v1.1：5 支 phase 小队 + dispatcher 领衔的 11 支 profile 入口小队）。
 > 方法论文档见包内 aidlc-relay-pack/（SKILL.md 总览、relay-protocol.md 人工接力协议、5 支小队的编排指令、33 份 stage 契约）。
-> 导入完成后，团队成员从 `docs/72-aidlc-relay-usage-guide.md` 读起。
+> 导入完成后，团队成员从 `docs/72-aidlc-relay-usage-guide.md` 读起；日常按场景从 73 号的 Start with 总表选入口：`docs/73-aidlc-relay-profiles.md`。
 
 ## 0. 包内容
 
 | 条目 | 说明 |
 |---|---|
-| aidlc-relay-pack/ | skill 源目录（SKILL.md + relay-protocol.md + squad-instructions/ + references/stages/） |
-| aidlc-relay-roster.json | 14 agents + 5 squads 的字段级事实源（W5 重导入比对以此为准）；5 支小队的 instructions 为 phase 编排契约**全文嵌入**（打包时由 squad-instructions/phase-{1..5}-*.md 生成，seed 不从文件读入） |
+| aidlc-relay-pack/ | skill 源目录（SKILL.md + relay-protocol.md + squad-instructions/ + references/stages/ + profiles-relay-paths.md） |
+| aidlc-relay-pack/profiles-relay-paths.md | 11 条 profile 路由表与编排规则（入口小队契约：逐 stage 条件标注、kickoff 模板、防呆注记） |
+| aidlc-relay-pack/squad-instructions/entry-*.md | 11 支 profile 入口小队的编排指令（与 roster 内联一致） |
+| aidlc-relay-roster.json | 15 agents + 16 squads 的字段级事实源（W5 重导入比对以此为准）；16 支小队的 instructions 为编排契约**全文嵌入**（既有 5 支由 squad-instructions/phase-{1..5}-*.md 生成，v1.1 的 11 支入口小队由 squad-instructions/entry-*.md 生成，seed 不从文件读入） |
 | seed-aidlc-relay.sh | 幂等导入脚本（同名 agent 更新；squad 按"精确名 + aidlc-relay:v1 标记"解析，不重复创建） |
 | SHA256SUMS | 包内容清单校验和；打包前断言 stage 契约 33/33 且 slug 集合与 refs 派生集一致、协议文件与小队指令齐备 |
 | README.md | 本文件 |
 | docs/72-aidlc-relay-usage-guide.md | 团队成员使用教程，导入后从这份读起 |
+| docs/73-aidlc-relay-profiles.md | profile 入口用法指南（Start with 总表、走法与选型） |
 
 ## 1. 前置条件
 
@@ -44,7 +47,7 @@ bash seed-aidlc-relay.sh --verify     # 追加 HTTP 层探针（挂载读回 + �
 
 5. 可选：
    - `--verify-full`：运行层探针（队长唤醒、guest 状态禁令、planned 回放）——**需要 daemon 在线且 agents 已绑 runtime**，会真实运行智能体（消耗 token）；`VERIFY_TIMEOUT_SECS` 可调超时（默认 600s）。
-   - `--bind-runtime <uuid>`：把 14 个 agent 全部改绑到另一 runtime（导入时创建即绑 MULTICA_RUNTIME_ID，此项只作后续改绑）。
+   - `--bind-runtime <uuid>`：把 15 个 agent 全部改绑到另一 runtime（导入时创建即绑 MULTICA_RUNTIME_ID，此项只作后续改绑）。
    - `--force-skill-import`：同名 skill 已存在时用 `on_conflict=overwrite` 重导。
    - `AIDLC_SKILL_ZIP=<path>`：使用预构建的 skill zip 而非现场打包。
 
@@ -53,7 +56,7 @@ bash seed-aidlc-relay.sh --verify     # 追加 HTTP 层探针（挂载读回 + �
 - agent 同名 → PUT 更新（description/instructions/visibility），不重复创建；runtime 绑定只在创建时写入，改绑走 `--bind-runtime`，update 不动 runtime。
 - squad 按"精确名 + description 含 `aidlc-relay:v1`"解析：命中即更新（instructions/description 刷新、成员补齐），未命中才创建——087 迁移后 squad 名不再唯一，纯名解析会误并其他小队。
 - skill 按名解析：存在即跳过（`--force-skill-import` 强制覆盖重导）。
-- seed 双跑：实体计数不变（14/5/1）、squad 无重复（AC5）。
+- seed 双跑：实体计数不变（15/16/1）、squad 无重复（AC5）。
 
 ## 4. 零凭据声明
 

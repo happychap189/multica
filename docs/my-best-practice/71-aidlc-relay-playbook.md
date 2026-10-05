@@ -12,7 +12,7 @@
 
 | 机制 | 含义 |
 |---|---|
-| 5 支 phase 小队 | 一个 phase 一支小队（P1 启动 / P2 构思 / P3 孵化 / P4 构建 / P5 运营），14 个 aidlc persona 智能体跨队共享成员；33 个 stage 由队长派单给成员或队长亲做 |
+| 5 支 phase 小队 | 一个 phase 一支小队（P1 启动 / P2 构思 / P3 孵化 / P4 构建 / P5 运营），14 个 aidlc persona 智能体跨队共享成员（v1.1 另增 dispatcher 与 11 支 profile 入口小队，共 15 agents / 16 squads，入口用法见 [73 号](73-aidlc-relay-profiles.md)）；33 个 stage 由队长派单给成员或队长亲做 |
 | phase 级人审 ×5 | stage 不设单独人审；每个 phase 结束由环节负责人（人类成员）按清单审一次，通过后改派下一环节负责人并 @ 下一队 |
 | 进度锚 | 每 stage 完成队长发一条 `[P{phase} {i}/{n}] {slug} done → next {next-slug}` 顶层评论（零 mention）。锚是接力的断点记录、恢复依据与计数凭据 |
 | 显式 @ 回执 | 交付与 verdict 回复除在线程内回复外必须显式 @ 队长（mention markdown 字面量）。这是唤醒链的全版本兼容路径，也是漂移可观测性的基础 |
@@ -23,14 +23,14 @@
 
 | 条目 | 说明 |
 |---|---|
-| aidlc-relay-pack/ | skill 源目录：SKILL.md 总览 + relay-protocol.md 接力协议 + 5 份 squad-instructions/ 编排指令 + references/stages/ 33 份 stage 契约 + bugfix-relay-path.md 变体 |
-| aidlc-relay-roster.json | 14 agents + 5 squads 的字段级事实源（重导入比对以此为准） |
+| aidlc-relay-pack/ | skill 源目录：SKILL.md 总览 + relay-protocol.md 接力协议 + profiles-relay-paths.md profile 路由表 + 16 份 squad-instructions/ 编排指令（5 phase + 11 entry）+ references/stages/ 33 份 stage 契约 + bugfix-relay-path.md 变体 |
+| aidlc-relay-roster.json | 15 agents + 16 squads 的字段级事实源（重导入比对以此为准；v1.1 增 dispatcher 与 11 支 profile 入口小队） |
 | seed-aidlc-relay.sh | 幂等导入脚本（含两层探针，见 71.3.1） |
 | SHA256SUMS / README.md | 校验清单与导入指南（[templates/aidlc-relay-pack-export-README.md](templates/aidlc-relay-pack-export-README.md)） |
 
-导入后的实体：1 个 skill（aidlc-relay-methodology，挂全员）+ 14 个智能体 + 5 支小队（编排契约写在小队 instructions，阶段交付时按 phase 作用域注入队长上下文）。
+导入后的实体：1 个 skill（aidlc-relay-methodology，挂全员）+ 15 个智能体 + 16 支小队（v1.1：既有 5 支 phase 小队 + dispatcher 领衔的 11 支 profile 入口小队，入口用法见 [73 号](73-aidlc-relay-profiles.md)；编排契约写在小队 instructions，阶段交付时按 phase 作用域注入队长上下文）。
 
-5 支小队的构成与 stage 覆盖（14 persona 跨队共享；11 真实出场 + 3 定义在场）：
+5 支 phase 小队的构成与 stage 覆盖（14 persona 跨队共享；11 真实出场 + 3 定义在场。v1.1 的 dispatcher 与 11 支 profile 入口小队不在此表，见 [73 号](73-aidlc-relay-profiles.md)）：
 
 | 小队 | phase | stages | 队长 | 成员 |
 |---|---|---|---|---|
@@ -47,7 +47,7 @@
 ### 71.2.1 导入方前置清单
 
 1. **multica CLI** 可用（用于 runtime 注册等操作）。
-2. **自有 AI coding runtime**：一台已安装并在线的 daemon（运行时）——14 个智能体创建即绑这个 runtime。
+2. **自有 AI coding runtime**：一台已安装并在线的 daemon（运行时）——15 个智能体创建即绑这个 runtime。
 3. **账号 + PAT**：网页 Settings 创建 PAT，或 `multica login --token`；PAT 需目标 workspace 的管理权限。
 4. 目标 workspace 的 UUID（或 slug）。
 5. 本机有 `curl`、`jq`、`zip`、`unzip`。
@@ -72,11 +72,11 @@ export MULTICA_WORKSPACE_ID="<workspace-uuid-or-slug>"
 export MULTICA_RUNTIME_ID="<your-runtime-uuid>"
 ```
 
-其他可选参数：`--bind-runtime <uuid>`（把 14 个 agent 改绑到另一 runtime，仅作后续改绑）、`--force-skill-import`（同名 skill 强制覆盖重导）、`AIDLC_SKILL_ZIP=<path>`（用预构建 zip）。
+其他可选参数：`--bind-runtime <uuid>`（把 15 个 agent 改绑到另一 runtime，仅作后续改绑）、`--force-skill-import`（同名 skill 强制覆盖重导）、`AIDLC_SKILL_ZIP=<path>`（用预构建 zip）。
 
 ### 71.2.3 导入完成判定
 
-- seed 退出码 0，且断言输出：**14 agents / 5 squads / 1 skill** 全建；
+- seed 退出码 0，且断言输出：**15 agents / 16 squads / 1 skill** 全建（v1.1 含 dispatcher 与 11 支 profile 入口小队）；
 - `--verify` PASS：skill 挂载读回 `GET /api/agents/{id}/skills` 命中；改派入队探针通过（建 scratch issue → 改派给小队 → 任务快照出现 queued 状态的队长任务 → 删除 issue）；
 - `--verify-full` PASS（可选）：队长唤醒、guest 状态禁令、planned 回放三项运行层探针通过。
 

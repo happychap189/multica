@@ -7,21 +7,22 @@
 
 aidlc 接力是把一个需求从"一句话想法"推进到"可运营交付物"的人工接力流程：5 支小队按 phase 接力干活，每个 phase 结束由你做一次人审，通过后改派并 @ 下一队。队内派单、交付、互审、进度锚全部由 agents 自动完成；你只负责五类动作——**开工、看进度、人审、交接、终审**（全程 5 次人审，bugfix 路径 4 次）。
 
-**读者假设**：导入已完成（1 个 skill + 14 个智能体 + 5 支小队就位）；会建 issue、写评论、用 @ 选择器、改派 issue 负责人。协议机制不在本文展开——方法论总览见包内 aidlc-relay-pack/SKILL.md，接力协议见包内 aidlc-relay-pack/relay-protocol.md。
+**读者假设**：导入已完成（1 个 skill + 15 个智能体 + 16 支小队就位——v1.1 增 dispatcher 与 11 支 profile 入口小队，入口用法见 73 号）；会建 issue、写评论、用 @ 选择器、改派 issue 负责人。协议机制不在本文展开——方法论总览见包内 aidlc-relay-pack/SKILL.md，接力协议见包内 aidlc-relay-pack/relay-protocol.md。
 
-**三份文档分工**：
+**四份文档分工**：
 
 | 文档 | 定位 | 位置 |
 |---|---|---|
 | 70 号 通用协作 | 团队成员与 agents 协作的通用玩法 | 仓库内 docs/my-best-practice/70-collab-playbook.md（不随包分发） |
 | 71 号 playbook | 导入、监控、恢复实战与验证记录（运维视角） | 仓库内 docs/my-best-practice/71-aidlc-relay-playbook.md（不随包分发） |
 | 72 号（本文） | 团队成员驱动一轮完整接力的照走教程 | 本文（随导出包分发） |
+| 73 号 profile 入口 | 按 profile 快捷启动（@ 入口小队）的入口总表、走法与选型 | 仓库内 docs/my-best-practice/73-aidlc-relay-profiles.md（随导出包分发，zip 内为 docs/73-aidlc-relay-profiles.md） |
 
-三份文档相互以纯文本路径引用（无跳转链接）——72 号是唯一随包分发的成员侧文档，70/71 在仓库内。
+四份文档相互以纯文本路径引用（无跳转链接）——72/73 两份随包分发的成员侧文档，70/71 在仓库内。
 
 **导入前置**：导入步骤与前置条件不在本文范围——若你拿到的是导出 zip，从包根目录的 README.md 读起；仓库内对应 docs/my-best-practice/templates/aidlc-relay-pack-export-README.md。
 
-**适用范围**：本教程只覆盖 relay 版（官方后端可运行），不覆盖引擎版工作流。
+**适用范围**：本教程只覆盖 relay 版（官方后端可运行），不覆盖引擎版工作流。按场景快捷启动（@ 入口小队）另有 73 号 profile 入口指南：仓库内 docs/my-best-practice/73-aidlc-relay-profiles.md（随导出包分发，zip 内为 docs/73-aidlc-relay-profiles.md）。
 
 **读法建议**：第一次跑，通读 72.3 全节并按时间序照走；跑通一轮后，日常用 72.4.1 的场景索引直达对应小节；卡住时翻 72.5。适合一轮完整交付的需求（从零或改造）；零散小活走 72.4.2 单点任务，缺陷修复走 72.4.4 快路径。
 
@@ -62,7 +63,7 @@ aidlc 接力是把一个需求从"一句话想法"推进到"可运营交付物"�
 
 出场口径：前 11 个在真实接力中出场；后 3 个（aidlc-composer / aidlc-compliance / aidlc-devsecops）为休眠或定义在场——接力中不会主动出现，只在 72.4.2 的单点任务里由你显式 @ 才参与。
 
-skill 说明：方法论 skill（aidlc-relay-methodology）导入时已自动挂载到全部 14 个智能体，你无需任何操作。
+skill 说明：方法论 skill（aidlc-relay-methodology）导入时已自动挂载到全部 15 个智能体（v1.1 含 dispatcher），你无需任何操作。
 
 ## 72.3 全程走法（贯穿案例：会议决议追踪小工具）
 
@@ -283,6 +284,7 @@ P5 人审通过后，进入两段式收尾：
 | 只需单个智能体干一件小事 | 72.4.2 |
 | 只要某个 phase 的产出 | 72.4.3 |
 | 缺陷修复快路径 | 72.4.4 |
+| 按 profile 快捷启动（@ 入口小队） | 73 号 profile 入口指南（仓库内 docs/my-best-practice/73-aidlc-relay-profiles.md，随导出包分发） |
 
 索引覆盖首次照走之后的日常复用；第一次仍建议通读 72.3。
 

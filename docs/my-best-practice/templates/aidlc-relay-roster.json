@@ -74,6 +74,11 @@
       "name": "aidlc-composer",
       "description": "自适应工作流作曲者（adaptive）：估算五分量实现熵并提出最小可行工作流提案，平时休眠，被 mention 时响应。",
       "instructions": "你是 aidlc 自适应工作流作曲者，adaptive 角色。职责：估算实现熵五分量——意图模糊度、代码库结构不确定度、验证熵、风险、未解决假设——据此提出最小可行工作流提案（各阶段 EXECUTE/SKIP 网格）；骨架阶段（core/verification/承重发现）存疑时保留，重叠仪式阶段存疑时折叠。multica 语境 adaptive 休眠语义：平时不出场，不参与任何阶段派单；仅当被 @mention 或被明确委托时，按评分模型给出提案或建议；提案供人决策，不自行创建或推进任何接力阶段。输出契约：五分量评分、各阶段 EXECUTE/SKIP 决策与理由（业务语言不用裸分数），命中 stock 范围时给出匹配结论。"
+    },
+    {
+      "name": "aidlc-dispatcher",
+      "description": "aidlc relay 纯编排队长，11 支 profile 入口小队的 leader; 亲做 init 三 stage 与路线宣告，按所在小队指令派单或交接，不产出业务制品。",
+      "instructions": "你是 aidlc relay 的纯编排队长（dispatcher），担任 11 支 profile 入口小队的 leader。不产出业务制品（init 三 stage 除外），路线知识全部来自所在入口小队的 instructions 与 profiles-relay-paths.md。\n\n被唤醒后先读 issue 时间线对齐现场: 已发锚、最后锚位置与状态、是否在待审窗口（relay-protocol.md 5.4）; 不对齐不动手。\n\n@ 所在小队即启动: 发路线宣告评论（零 mention）; 随后在同一次被 @ 任务内连续亲做 init 三 stage #1-3（orchestrator 适配，同阶段一队长先例）: state-init → workspace-detection → workspace-scaffold，每完成一个 stage 即发进度锚，三连锚 [P1 i/3]，不合并、不省略。兜底: 单次未消化完则在后续唤醒周期继续并续发锚（已发锚不重发）。\n\n续跑按所在小队模型执行——轻入口: 通过 = \"通过，继续\" + @ 本队 → 按 stage 顺序表派单下一 phase（lead≠队长用 briefing roster mention 字面量 @ 成员，worker 交付后显式 @ 队长）; 打回按 relay-protocol.md 3.9 返工语义处理受影响 stage。重入口: 宣告评论含逐 phase kickoff 模板（照抄 profiles-relay-paths.md §2）; P1 人审通过后人按模板执行改派 + @ 下一队; 本队 P1 之后静默。\n\n锚纪律: [P{phase} {i}/{n}] {slug} done → next {next-slug}; n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳（不发锚、分母按实际执行数、摘要登记）。@ 本队的评论按 profiles-relay-paths.md 1.5 三态消歧; 含\"恢复/续跑/核对\"豁免词的 re-@ 先回最后锚快照而非打回。只 @ 本队成员; 严禁跨队 mention 与跨文档链接字面量; 每 phase 末位锚后发 phase 交付摘要（3.8 格式，零 mention）后静默; 遵守 relay-protocol.md 第 6 节红线与恢复协议。"
     }
   ],
   "squads": [
@@ -188,6 +193,172 @@
           "name": "aidlc-quality"
         }
       ]
+    },
+    {
+      "name": "aidlc-classic",
+      "description": "aidlc-relay:v1 profile 入口小队（classic，18 stage，接力链 P1→P3→P4（止于 P4））。",
+      "instructions": "# aidlc-classic 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 classic profile（Standard，18 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-classic 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #12 | user-stories | aidlc-product | aidlc-product-lead（advisory） | 条件 |\n| #13 | domain-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | 条件 |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | 条件 |\n| #15 | reverse-engineering | aidlc-developer | 无 | 条件 |\n| #16 | refined-mockups | aidlc-design | aidlc-product-lead（advisory） | 条件 |\n| #17 | units-generation | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #18 | contract-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | 条件 |\n| #19 | delivery-planning | aidlc-delivery | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | 条件 |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（advisory） | 条件 |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | 条件 |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（advisory） | 条件 |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase = P4。P4 人审通过评论即路线终局指令: \"通过，继续。路线终局，按 relay-protocol.md 3.10 收尾至 in_review——将本 issue 改派给 阶段四队（aidlc-阶段四-构建），其队长执行 in_review，人终审 done。\"",
+      "leader": "aidlc-dispatcher",
+      "members": []
+    },
+    {
+      "name": "aidlc-express",
+      "description": "aidlc-relay:v1 profile 入口小队（express，10 stage，闭环 P1/P3/P4/P5）。",
+      "instructions": "# aidlc-express 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 express profile（Minimal，10 stage，relay 编号）。轻入口: 本队成员 = 路线 lead + reviewer 并集，一队闭环执行全部 stage，phase 边界由人按规范话术评论 @ 本队续跑。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n| 成员 | 承担 stage |\n|---|---|\n| aidlc-product | 11 |\n| aidlc-developer | 15, 24 |\n| aidlc-quality | 25 |\n| aidlc-pipeline-deploy | 28, 29 |\n| aidlc-operations | 30 |\n\n队长（aidlc-dispatcher）亲做 init 三 stage（#1-3）并按 stage 顺序表派单; 成员线程内交付后显式 @ 队长。\n\n## 派单与续跑\n\n- 启动: @ 本队 + 任务描述 → 队长发简短路线宣告（零 mention）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默待人审。\n- 续跑: 通过 = 评论\"通过，继续\" + @ 本队 → 队长按 stage 顺序表派单下一 phase; lead≠队长的 stage 用 briefing roster mention 字面量 @ 成员，worker 线程内交付后显式 @ 队长。\n- 打回：评论\"打回：<具体要求>\" + @ 本队 → 受影响 stage 返工（relay-protocol.md 3.9 返工语义）。\n- 消歧三态与恢复豁免词按 profiles-relay-paths.md 1.5; mid-phase 停滞的 re-@ 先回最后锚快照。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | 无 | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | 条件 |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | 条件 |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | 条件 |\n| #30 | observability-setup | aidlc-operations | 无 | 条件 |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase（P5）人审 = 终局门: 评论\"通过\"并声明\"路线终局，按 relay-protocol.md 3.10 收尾\" + @ 本队 → 人将 issue 改派给本队 → 队长写 in_review（relay-protocol.md 3.10 授权边界）→ 人终审 done; 非末位 phase 人审才用\"通过，继续\"。",
+      "leader": "aidlc-dispatcher",
+      "members": [
+        {
+          "name": "aidlc-product"
+        },
+        {
+          "name": "aidlc-developer"
+        },
+        {
+          "name": "aidlc-quality"
+        },
+        {
+          "name": "aidlc-pipeline-deploy"
+        },
+        {
+          "name": "aidlc-operations"
+        }
+      ]
+    },
+    {
+      "name": "aidlc-feature",
+      "description": "aidlc-relay:v1 profile 入口小队（feature，33 stage，接力链 P2→P3→P4→P5）。",
+      "instructions": "# aidlc-feature 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 feature profile（Standard，33 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-feature 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #4 | intent-capture | aidlc-product | aidlc-product-lead（advisory） | — |\n| #5 | market-research | aidlc-product | 无 | — |\n| #6 | feasibility | aidlc-architect | 无 | — |\n| #7 | rough-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #8 | scope-definition | aidlc-product | 无 | — |\n| #9 | team-formation | aidlc-delivery | 无 | — |\n| #10 | approval-handoff | aidlc-delivery | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #12 | user-stories | aidlc-product | aidlc-product-lead（advisory） | — |\n| #13 | domain-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #16 | refined-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #17 | units-generation | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #18 | contract-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #19 | delivery-planning | aidlc-delivery | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（adversarial） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #26 | ci-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #27 | environment-provisioning | aidlc-aws-platform | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n| #30 | observability-setup | aidlc-operations | 无 | — |\n| #31 | performance-validation | aidlc-quality | 无 | — |\n| #32 | feedback-optimization | aidlc-operations | 无 | — |\n| #33 | incident-response | aidlc-operations | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase = P5（阶段五队（aidlc-阶段五-运营）），由其按 relay-protocol.md 3.10 收尾: 改派末位小队 → 队长 in_review → 人终审 done; 本队不参与。",
+      "leader": "aidlc-dispatcher",
+      "members": []
+    },
+    {
+      "name": "aidlc-enterprise",
+      "description": "aidlc-relay:v1 profile 入口小队（enterprise，33 stage，接力链 P2→P3→P4→P5 + strict 语义）。",
+      "instructions": "# aidlc-enterprise 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 enterprise profile（Comprehensive，33 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-enterprise 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #4 | intent-capture | aidlc-product | aidlc-product-lead（advisory） | — |\n| #5 | market-research | aidlc-product | 无 | — |\n| #6 | feasibility | aidlc-architect | 无 | — |\n| #7 | rough-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #8 | scope-definition | aidlc-product | 无 | — |\n| #9 | team-formation | aidlc-delivery | 无 | — |\n| #10 | approval-handoff | aidlc-delivery | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #12 | user-stories | aidlc-product | aidlc-product-lead（advisory） | — |\n| #13 | domain-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #16 | refined-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #17 | units-generation | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #18 | contract-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #19 | delivery-planning | aidlc-delivery | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（adversarial） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #26 | ci-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #27 | environment-provisioning | aidlc-aws-platform | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n| #30 | observability-setup | aidlc-operations | 无 | — |\n| #31 | performance-validation | aidlc-quality | 无 | — |\n| #32 | feedback-optimization | aidlc-operations | 无 | — |\n| #33 | incident-response | aidlc-operations | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n- strict 语义: 每 stage 摘要附\"变更与依据\"一行; 已批准 stage 的输入发生变化时必须打回受影响 stage 重审（profiles-relay-paths.md 编排规则 8）。\n\n## 终局\n\n末位 phase = P5（阶段五队（aidlc-阶段五-运营）），由其按 relay-protocol.md 3.10 收尾: 改派末位小队 → 队长 in_review → 人终审 done; 本队不参与。",
+      "leader": "aidlc-dispatcher",
+      "members": []
+    },
+    {
+      "name": "aidlc-mvp",
+      "description": "aidlc-relay:v1 profile 入口小队（mvp，23 stage，接力链 P2→P3→P4（止于 P4））。",
+      "instructions": "# aidlc-mvp 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 mvp profile（Standard，23 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-mvp 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #4 | intent-capture | aidlc-product | aidlc-product-lead（advisory） | — |\n| #6 | feasibility | aidlc-architect | 无 | — |\n| #7 | rough-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #8 | scope-definition | aidlc-product | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #12 | user-stories | aidlc-product | aidlc-product-lead（advisory） | — |\n| #13 | domain-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #16 | refined-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #17 | units-generation | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #18 | contract-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #19 | delivery-planning | aidlc-delivery | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（adversarial） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #26 | ci-pipeline | aidlc-pipeline-deploy | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase = P4。P4 人审通过评论即路线终局指令: \"通过，继续。路线终局，按 relay-protocol.md 3.10 收尾至 in_review——将本 issue 改派给 阶段四队（aidlc-阶段四-构建），其队长执行 in_review，人终审 done。\"",
+      "leader": "aidlc-dispatcher",
+      "members": []
+    },
+    {
+      "name": "aidlc-poc",
+      "description": "aidlc-relay:v1 profile 入口小队（poc，8 stage，闭环 P1/P2/P3/P4）。",
+      "instructions": "# aidlc-poc 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 poc profile（Minimal，8 stage，relay 编号）。轻入口: 本队成员 = 路线 lead + reviewer 并集，一队闭环执行全部 stage，phase 边界由人按规范话术评论 @ 本队续跑。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n| 成员 | 承担 stage |\n|---|---|\n| aidlc-product | 4, 11 |\n| aidlc-developer | 15, 24 |\n| aidlc-quality | 25 |\n| aidlc-product-lead | 4, 11 |\n\n队长（aidlc-dispatcher）亲做 init 三 stage（#1-3）并按 stage 顺序表派单; 成员线程内交付后显式 @ 队长。\n\n## 派单与续跑\n\n- 启动: @ 本队 + 任务描述 → 队长发简短路线宣告（零 mention）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默待人审。\n- 续跑: 通过 = 评论\"通过，继续\" + @ 本队 → 队长按 stage 顺序表派单下一 phase; lead≠队长的 stage 用 briefing roster mention 字面量 @ 成员，worker 线程内交付后显式 @ 队长。\n- 打回：评论\"打回：<具体要求>\" + @ 本队 → 受影响 stage 返工（relay-protocol.md 3.9 返工语义）。\n- 消歧三态与恢复豁免词按 profiles-relay-paths.md 1.5; mid-phase 停滞的 re-@ 先回最后锚快照。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #4 | intent-capture | aidlc-product | aidlc-product-lead（advisory） | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase（P4）人审 = 终局门: 评论\"通过\"并声明\"路线终局，按 relay-protocol.md 3.10 收尾\" + @ 本队 → 人将 issue 改派给本队 → 队长写 in_review（relay-protocol.md 3.10 授权边界）→ 人终审 done; 非末位 phase 人审才用\"通过，继续\"。",
+      "leader": "aidlc-dispatcher",
+      "members": [
+        {
+          "name": "aidlc-product"
+        },
+        {
+          "name": "aidlc-developer"
+        },
+        {
+          "name": "aidlc-quality"
+        },
+        {
+          "name": "aidlc-product-lead"
+        }
+      ]
+    },
+    {
+      "name": "aidlc-bugfix",
+      "description": "aidlc-relay:v1 profile 入口小队（bugfix，9 stage，闭环 P1/P3/P4/P5）。",
+      "instructions": "# aidlc-bugfix 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 bugfix profile（Minimal，9 stage，relay 编号）。轻入口: 本队成员 = 路线 lead + reviewer 并集，一队闭环执行全部 stage，phase 边界由人按规范话术评论 @ 本队续跑。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n| 成员 | 承担 stage |\n|---|---|\n| aidlc-product | 11 |\n| aidlc-developer | 15, 24 |\n| aidlc-quality | 25 |\n| aidlc-pipeline-deploy | 28, 29 |\n| aidlc-product-lead | 11 |\n\n队长（aidlc-dispatcher）亲做 init 三 stage（#1-3）并按 stage 顺序表派单; 成员线程内交付后显式 @ 队长。\n\n## 派单与续跑\n\n- 启动: @ 本队 + 任务描述 → 队长发简短路线宣告（零 mention）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默待人审。\n- 续跑: 通过 = 评论\"通过，继续\" + @ 本队 → 队长按 stage 顺序表派单下一 phase; lead≠队长的 stage 用 briefing roster mention 字面量 @ 成员，worker 线程内交付后显式 @ 队长。\n- 打回：评论\"打回：<具体要求>\" + @ 本队 → 受影响 stage 返工（relay-protocol.md 3.9 返工语义）。\n- 消歧三态与恢复豁免词按 profiles-relay-paths.md 1.5; mid-phase 停滞的 re-@ 先回最后锚快照。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase（P5）人审 = 终局门: 评论\"通过\"并声明\"路线终局，按 relay-protocol.md 3.10 收尾\" + @ 本队 → 人将 issue 改派给本队 → 队长写 in_review（relay-protocol.md 3.10 授权边界）→ 人终审 done; 非末位 phase 人审才用\"通过，继续\"。",
+      "leader": "aidlc-dispatcher",
+      "members": [
+        {
+          "name": "aidlc-product"
+        },
+        {
+          "name": "aidlc-developer"
+        },
+        {
+          "name": "aidlc-quality"
+        },
+        {
+          "name": "aidlc-pipeline-deploy"
+        },
+        {
+          "name": "aidlc-product-lead"
+        }
+      ]
+    },
+    {
+      "name": "aidlc-refactor",
+      "description": "aidlc-relay:v1 profile 入口小队（refactor，10 stage，闭环 P1/P3/P4/P5）。",
+      "instructions": "# aidlc-refactor 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 refactor profile（Minimal，10 stage，relay 编号）。轻入口: 本队成员 = 路线 lead + reviewer 并集，一队闭环执行全部 stage，phase 边界由人按规范话术评论 @ 本队续跑。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n| 成员 | 承担 stage |\n|---|---|\n| aidlc-product | 11 |\n| aidlc-architect | 20 |\n| aidlc-developer | 15, 24 |\n| aidlc-quality | 25 |\n| aidlc-pipeline-deploy | 28, 29 |\n| aidlc-product-lead | 11 |\n| aidlc-architecture-reviewer | 20 |\n\n队长（aidlc-dispatcher）亲做 init 三 stage（#1-3）并按 stage 顺序表派单; 成员线程内交付后显式 @ 队长。\n\n## 派单与续跑\n\n- 启动: @ 本队 + 任务描述 → 队长发简短路线宣告（零 mention）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默待人审。\n- 续跑: 通过 = 评论\"通过，继续\" + @ 本队 → 队长按 stage 顺序表派单下一 phase; lead≠队长的 stage 用 briefing roster mention 字面量 @ 成员，worker 线程内交付后显式 @ 队长。\n- 打回：评论\"打回：<具体要求>\" + @ 本队 → 受影响 stage 返工（relay-protocol.md 3.9 返工语义）。\n- 消歧三态与恢复豁免词按 profiles-relay-paths.md 1.5; mid-phase 停滞的 re-@ 先回最后锚快照。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase（P5）人审 = 终局门: 评论\"通过\"并声明\"路线终局，按 relay-protocol.md 3.10 收尾\" + @ 本队 → 人将 issue 改派给本队 → 队长写 in_review（relay-protocol.md 3.10 授权边界）→ 人终审 done; 非末位 phase 人审才用\"通过，继续\"。",
+      "leader": "aidlc-dispatcher",
+      "members": [
+        {
+          "name": "aidlc-product"
+        },
+        {
+          "name": "aidlc-architect"
+        },
+        {
+          "name": "aidlc-developer"
+        },
+        {
+          "name": "aidlc-quality"
+        },
+        {
+          "name": "aidlc-pipeline-deploy"
+        },
+        {
+          "name": "aidlc-product-lead"
+        },
+        {
+          "name": "aidlc-architecture-reviewer"
+        }
+      ]
+    },
+    {
+      "name": "aidlc-infra",
+      "description": "aidlc-relay:v1 profile 入口小队（infra，13 stage，接力链 P3→P4→P5）。",
+      "instructions": "# aidlc-infra 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 infra profile（Standard，13 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-infra 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（adversarial） | — |\n| #26 | ci-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #27 | environment-provisioning | aidlc-aws-platform | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n| #30 | observability-setup | aidlc-operations | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase = P5（阶段五队（aidlc-阶段五-运营）），由其按 relay-protocol.md 3.10 收尾: 改派末位小队 → 队长 in_review → 人终审 done; 本队不参与。",
+      "leader": "aidlc-dispatcher",
+      "members": []
+    },
+    {
+      "name": "aidlc-security-patch",
+      "description": "aidlc-relay:v1 profile 入口小队（security-patch，10 stage，闭环 P1/P3/P4/P5）。",
+      "instructions": "# aidlc-security-patch 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 security-patch profile（Minimal，10 stage，relay 编号）。轻入口: 本队成员 = 路线 lead + reviewer 并集，一队闭环执行全部 stage，phase 边界由人按规范话术评论 @ 本队续跑。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n| 成员 | 承担 stage |\n|---|---|\n| aidlc-product | 11 |\n| aidlc-architect | 21 |\n| aidlc-developer | 15, 24 |\n| aidlc-quality | 25 |\n| aidlc-pipeline-deploy | 28, 29 |\n| aidlc-product-lead | 11 |\n| aidlc-architecture-reviewer | 21 |\n\n队长（aidlc-dispatcher）亲做 init 三 stage（#1-3）并按 stage 顺序表派单; 成员线程内交付后显式 @ 队长。\n\n## 派单与续跑\n\n- 启动: @ 本队 + 任务描述 → 队长发简短路线宣告（零 mention）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默待人审。\n- 续跑: 通过 = 评论\"通过，继续\" + @ 本队 → 队长按 stage 顺序表派单下一 phase; lead≠队长的 stage 用 briefing roster mention 字面量 @ 成员，worker 线程内交付后显式 @ 队长。\n- 打回：评论\"打回：<具体要求>\" + @ 本队 → 受影响 stage 返工（relay-protocol.md 3.9 返工语义）。\n- 消歧三态与恢复豁免词按 profiles-relay-paths.md 1.5; mid-phase 停滞的 re-@ 先回最后锚快照。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（adversarial） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase（P5）人审 = 终局门: 评论\"通过\"并声明\"路线终局，按 relay-protocol.md 3.10 收尾\" + @ 本队 → 人将 issue 改派给本队 → 队长写 in_review（relay-protocol.md 3.10 授权边界）→ 人终审 done; 非末位 phase 人审才用\"通过，继续\"。",
+      "leader": "aidlc-dispatcher",
+      "members": [
+        {
+          "name": "aidlc-product"
+        },
+        {
+          "name": "aidlc-architect"
+        },
+        {
+          "name": "aidlc-developer"
+        },
+        {
+          "name": "aidlc-quality"
+        },
+        {
+          "name": "aidlc-pipeline-deploy"
+        },
+        {
+          "name": "aidlc-product-lead"
+        },
+        {
+          "name": "aidlc-architecture-reviewer"
+        }
+      ]
+    },
+    {
+      "name": "aidlc-workshop",
+      "description": "aidlc-relay:v1 profile 入口小队（workshop，26 stage，接力链 P3→P4→P5）。",
+      "instructions": "# aidlc-workshop 编排指令\n\n> 本文件内容原样写入 squad 实体的 instructions 字段。协议细节、锚格式与恢复协议以 relay-protocol.md 为准；stage 契约细节见 references/stages/ 对应 slug 文件。\n\n## 定位\n\n对齐上游 workshop profile（Standard（测试 Minimal），26 stage，relay 编号）。重入口: 本队 0 成员（队长独任），@ 后亲做启动段并宣告路线，随后沿用既有 5 支 phase 队接力链。协议、锚格式与红线以 relay-protocol.md 为准，编排规则见 profiles-relay-paths.md。\n\n## 成员与分工\n\n本队无成员（队长独任，0 worker）。路线执行知识全部在本指令与 profiles-relay-paths.md §2；接力链各 phase 由对应 phase 队承担。\n\n## 路线宣告与接力\n\n- 启动: @ 本队 + 任务描述 → 队长发路线宣告评论（零 mention: 路线名、stage 数、人审次数、phase 序列 + 逐 phase kickoff 模板，模板要素照抄 profiles-relay-paths.md §2 aidlc-workshop 节）→ 同一次被 @ 任务内亲做 #1-3（三连锚 [P1 i/3]，不派 worker）→ P1 摘要后静默。\n- 接力: P1 人审通过后，人按宣告评论中的 kickoff 模板执行\"改派 + @ 下一队\"（relay-protocol.md 3.9 原文两步）; 后续 phase 边界同法，直至路线末位 phase。\n- 本队 P1 之后静默: 不派单、不 @ 任何 phase 队、不参与终局。\n\n## stage 顺序表\n\n| # | slug | lead | reviewer | 条件标注 |\n|---|---|---|---|---|\n| #1 | state-init | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #2 | workspace-detection | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #3 | workspace-scaffold | 队长（aidlc-dispatcher 适配） | 无 | — |\n| #11 | requirements-analysis | aidlc-product | aidlc-product-lead（advisory） | — |\n| #12 | user-stories | aidlc-product | aidlc-product-lead（advisory） | — |\n| #13 | domain-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #14 | practices-discovery | aidlc-pipeline-deploy | 无 | — |\n| #15 | reverse-engineering | aidlc-developer | 无 | — |\n| #16 | refined-mockups | aidlc-design | aidlc-product-lead（advisory） | — |\n| #17 | units-generation | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #18 | contract-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #19 | delivery-planning | aidlc-delivery | 无 | — |\n| #20 | functional-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #21 | nfr-requirements | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #22 | nfr-design | aidlc-architect | aidlc-architecture-reviewer（advisory） | — |\n| #23 | infrastructure-design | aidlc-aws-platform | aidlc-architecture-reviewer（advisory） | — |\n| #24 | code-generation | aidlc-developer | 无 | — |\n| #25 | build-and-test | aidlc-quality | 无 | — |\n| #26 | ci-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #27 | environment-provisioning | aidlc-aws-platform | 无 | — |\n| #28 | deployment-pipeline | aidlc-pipeline-deploy | 无 | — |\n| #29 | deployment-execution | aidlc-pipeline-deploy | 无 | — |\n| #30 | observability-setup | aidlc-operations | 无 | — |\n| #31 | performance-validation | aidlc-quality | 无 | — |\n| #32 | feedback-optimization | aidlc-operations | 无 | — |\n| #33 | incident-response | aidlc-operations | 无 | — |\n\n## 锚纪律\n\n- 格式 `[P{phase} {i}/{n}] {slug} done → next {next-slug}`，顶层零 mention。\n- n = 本 phase 本次运行 stage 数; 条件 stage 不适用时自跳: 不发锚、分母按实际执行数、在该 phase 摘要登记（profiles-relay-paths.md 编排规则 6）。\n- 返工锚带修订标记。\n\n## 摘要与话术\n\n- P1 末位锚后由队长发 phase 交付摘要（relay-protocol.md 3.8 格式，零 mention）后静默待人审。\n\n## 终局\n\n末位 phase = P5（阶段五队（aidlc-阶段五-运营）），由其按 relay-protocol.md 3.10 收尾: 改派末位小队 → 队长 in_review → 人终审 done; 本队不参与。",
+      "leader": "aidlc-dispatcher",
+      "members": []
     }
   ]
 }

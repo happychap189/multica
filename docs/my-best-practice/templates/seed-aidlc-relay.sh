@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # seed-aidlc-relay.sh — idempotent import of the aidlc relay pack (plan W2):
-#   skill zip -> 14 agents -> 5 squads -> skill mount -> optional runtime rebind
+#   skill zip -> 15 agents -> 16 squads -> skill mount -> optional runtime rebind
 #   -> layered probes: --verify (HTTP layer) / --verify-full (runtime layer).
 #
 # Required env (no defaults, fail fast):
@@ -19,13 +19,14 @@
 # Flags:
 #   --verify               HTTP-layer probe: skill mount read-back + squad
 #                          reassignment enqueue (UPDATE path, same one the
-#                          terminal closure uses); creates and deletes a
-#                          scratch issue.
+#                          terminal closure uses), plus entry-squad wake probes
+#                          (express/classic reassign + classic comment mention);
+#                          creates and deletes scratch issues.
 #   --verify-full          Runtime-layer probe (needs daemon online and agents
 #                          bound to a live runtime): leader wake-up via squad
 #                          assignment, guest status ban, planned re-reply via
 #                          explicit agent mention. Runs real agents — opt in.
-#   --bind-runtime <id>    rebind all 14 agents to the given runtime after seed.
+#   --bind-runtime <id>    rebind all 15 agents to the given runtime after seed.
 #   --force-skill-import   re-import skill with on_conflict=overwrite when a
 #                          skill of the same name already exists.
 set -euo pipefail
@@ -132,7 +133,7 @@ else
   echo "  + skill imported: $SKILL_ID ($GOT_NAME, on_conflict=$STRATEGY)"
 fi
 
-echo "== 2/6 agents (14, idempotent: create or update by name) =="
+echo "== 2/6 agents (15, idempotent: create or update by name) =="
 for aname in $(jq -r '.agents[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   aid=$(agent_id "$aname")
   D=$(jq -r --arg n "$aname" '.agents[] | select(.name == $n) | .description' "$ROSTER_JSON")
@@ -150,7 +151,7 @@ for aname in $(jq -r '.agents[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   fi
 done
 
-echo "== 3/6 squads (5, resolve by exact name + description marker) =="
+echo "== 3/6 squads (16, resolve by exact name + description marker) =="
 for sname in $(jq -r '.squads[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   sid=$(squad_id "$sname")
   D=$(jq -r --arg n "$sname" '.squads[] | select(.name == $n) | .description' "$ROSTER_JSON")
@@ -169,6 +170,7 @@ for sname in $(jq -r '.squads[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   fi
   # members: ensure every roster member is in the squad (leader auto-added by server)
   while IFS= read -r mname; do
+    [ -n "$mname" ] || continue
     mid=$(agent_id "$mname")
     [ -n "$mid" ] || { echo "ERROR: member agent not found: $mname"; exit 1; }
     N=$(api GET "/squads/$sid/members" | jq -r --arg m "$mid" '[.[]? | select((.member_id // .id) == $m)] | length')
@@ -190,7 +192,7 @@ for sname in $(jq -r '.squads[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   fi
 done
 
-echo "== 4/6 skill mount (all 14 agents) =="
+echo "== 4/6 skill mount (all 15 agents) =="
 for aname in $(jq -r '.agents[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   aid=$(agent_id "$aname")
   N=$(api GET "/agents/$aid/skills" | jq -r --arg s "$SKILL_ID" '[.[]? | select((.id // .skill_id) == $s)] | length')
@@ -215,14 +217,14 @@ echo "== 5/6 assertions =="
 FAIL=0
 AGENTS_JSON=$(api GET /agents)
 NA=$(echo "$AGENTS_JSON" | jq '[.[]? | select(.name | startswith("aidlc-"))] | length')
-if [ "$NA" = "14" ]; then echo "  PASS: 14 aidlc-* agents"; else echo "  FAIL: aidlc-* agents=$NA (expect 14)"; FAIL=1; fi
+if [ "$NA" = "15" ]; then echo "  PASS: 15 aidlc-* agents"; else echo "  FAIL: aidlc-* agents=$NA (expect 15)"; FAIL=1; fi
 SQUADS_JSON=$(api GET /squads)
 SC=$(echo "$SQUADS_JSON" | jq --arg m "$MARKER" '[.[]? | select((.description // "" | contains($m)))] | length')
-if [ "$SC" = "5" ] ; then
+if [ "$SC" = "16" ] ; then
   DUP=$(echo "$SQUADS_JSON" | jq --arg m "$MARKER" '[.[]? | select((.description // "" | contains($m)))] | length - ([.[]? | select((.description // "" | contains($m))) | .name] | unique | length)')
-  if [ "$DUP" = "0" ]; then echo "  PASS: 5 marker squads, no duplicates"; else echo "  FAIL: duplicate marker squads detected"; FAIL=1; fi
-else echo "  FAIL: marker squads=$SC (expect 5)"; FAIL=1; fi
-for pair in "aidlc-阶段一-启动:4" "aidlc-阶段二-构思:5" "aidlc-阶段三-孵化:9" "aidlc-阶段四-构建:7" "aidlc-阶段五-运营:4"; do
+  if [ "$DUP" = "0" ]; then echo "  PASS: 16 marker squads, no duplicates"; else echo "  FAIL: duplicate marker squads detected"; FAIL=1; fi
+else echo "  FAIL: marker squads=$SC (expect 16)"; FAIL=1; fi
+for pair in "aidlc-阶段一-启动:4" "aidlc-阶段二-构思:5" "aidlc-阶段三-孵化:9" "aidlc-阶段四-构建:7" "aidlc-阶段五-运营:4" "aidlc-express:6" "aidlc-poc:5" "aidlc-bugfix:6" "aidlc-refactor:8" "aidlc-security-patch:8" "aidlc-classic:1" "aidlc-feature:1" "aidlc-enterprise:1" "aidlc-mvp:1" "aidlc-infra:1" "aidlc-workshop:1"; do
   sn="${pair%%:*}"; want="${pair##*:}"
   sid=$(squad_id "$sn")
   [ -n "$sid" ] || { echo "  FAIL: squad missing: $sn"; FAIL=1; continue; }
@@ -235,7 +237,7 @@ for aname in $(jq -r '.agents[].name' "$ROSTER_JSON" | LC_ALL=C sort); do
   N=$(api GET "/agents/$aid/skills" | jq -r --arg s "$SKILL_ID" '[.[]? | select((.id // .skill_id) == $s)] | length')
   [ "$N" -ge 1 ] && A=$((A+1))
 done
-if [ "$A" = "14" ]; then echo "  PASS: skill mounted 14/14"; else echo "  FAIL: skill mounted $A/14"; FAIL=1; fi
+if [ "$A" = "15" ]; then echo "  PASS: skill mounted 15/15"; else echo "  FAIL: skill mounted $A/15"; FAIL=1; fi
 [ "$FAIL" = "0" ] || { echo "ABORT: assertions failed"; exit 1; }
 
 echo "== 6/6 probes =="
@@ -256,6 +258,49 @@ wait_task() { # issue_id jq-filter timeout_secs label -> prints task id or empty
 }
 
 echo "== 6/6 probes =="
+# entry squad wake probes (v1.1) — these wake the dispatcher for real; quota
+# cost known, same precedent as the P1 squad probe. Scratch issues are deleted
+# in every path (including failures).
+verify_entry_reassign_probe() { # $1 = squad name — reassignment UPDATE path
+  local SN="$1" SID ISSUE TASKID ST VFAIL=0
+  SID=$(squad_id "$SN")
+  [ -n "$SID" ] || { echo "    FAIL: squad not resolved: $SN"; return 1; }
+  ISSUE=$(make_scratch_issue "[seed probe] verify: $SN reassignment enqueue (safe to delete)")
+  [ -n "$ISSUE" ] || { echo "    FAIL: scratch issue create"; return 1; }
+  api PUT "/issues/$ISSUE" "$(jq -n --arg s "$SID" '{assignee_type: "squad", assignee_id: $s}')"
+  TASKID=$(wait_task "$ISSUE" '.[]? | select(.issue_id == $iss and .is_leader_task == true) | .id' 60 "queued leader task ($SN)") || VFAIL=1
+  if [ -n "$TASKID" ] && [ "$TASKID" != "null" ]; then
+    ST=$(api GET /agent-task-snapshot | jq -r --arg t "$TASKID" '.[]? | select(.id == $t) | .status')
+    case "$ST" in
+      queued|pending|dispatched|running) echo "    PASS: $SN reassignment enqueued leader task (status=$ST, task=$TASKID)" ;;
+      *) echo "    FAIL: $SN leader task unexpected status=$ST"; VFAIL=1 ;;
+    esac
+  else
+    echo "    FAIL: no leader task within 60s of $SN reassignment"; VFAIL=1
+  fi
+  api DELETE "/issues/$ISSUE" >/dev/null
+  echo "    (scratch issue deleted: $ISSUE)"
+  return $VFAIL
+}
+verify_entry_mention_probe() { # $1 = squad name — comment mention wake path
+  local SN="$1" SID ISSUE MENTION NEW_TASK VFAIL=0
+  SID=$(squad_id "$SN")
+  [ -n "$SID" ] || { echo "    FAIL: squad not resolved: $SN"; return 1; }
+  ISSUE=$(make_scratch_issue "[seed probe] verify: $SN comment mention wake (safe to delete)")
+  [ -n "$ISSUE" ] || { echo "    FAIL: scratch issue create"; return 1; }
+  MENTION="[@$SN](mention://squad/$SID)"
+  api POST "/issues/$ISSUE/comments" "$(jq -n --arg m "$MENTION" '{content: ("seed verify probe: 入口唤醒探针（可删除）" + $m), type: "comment"}')" >/dev/null
+  NEW_TASK=$(wait_task "$ISSUE" '.[]? | select(.issue_id == $iss and .kind == "comment") | .id' 60 "comment task ($SN)") || VFAIL=1
+  if [ -n "$NEW_TASK" ] && [ "$NEW_TASK" != "null" ]; then
+    echo "    PASS: $SN comment mention enqueued comment-kind task ($NEW_TASK)"
+  else
+    echo "    FAIL: $SN comment mention did not enqueue a comment-kind task"; VFAIL=1
+  fi
+  api DELETE "/issues/$ISSUE" >/dev/null
+  echo "    (scratch issue deleted: $ISSUE)"
+  return $VFAIL
+}
+
 verify_http_probe() {
   echo "  --verify: HTTP-layer probe"
   local VFAIL=0
@@ -286,6 +331,14 @@ verify_http_probe() {
   fi
   api DELETE "/issues/$ISSUE" >/dev/null
   echo "    (scratch issue deleted: $ISSUE)"
+
+  # c) v1.1 entry probes: light closed-loop (express) and heavy zero-member
+  #    (classic) squads via the reassignment UPDATE path, plus the comment
+  #    mention wake (the real first-trigger form — mention://squad resolves to
+  #    the leader agent, kind=comment task)
+  verify_entry_reassign_probe "aidlc-express" || VFAIL=1
+  verify_entry_reassign_probe "aidlc-classic" || VFAIL=1
+  verify_entry_mention_probe "aidlc-classic" || VFAIL=1
   return $VFAIL
 }
 
@@ -334,5 +387,5 @@ verify_full_probe() {
 PF=0
 [ "$VERIFY" = "1" ] && { verify_http_probe || PF=1; }
 [ "$VERIFY_FULL" = "1" ] && { verify_full_probe || PF=1; }
-echo "DONE. relay pack seeded: skill $SKILL_NAME ($SKILL_ID) + 14 agents + 5 squads (marker $MARKER)"
+echo "DONE. relay pack seeded: skill $SKILL_NAME ($SKILL_ID) + 15 agents + 16 squads (marker $MARKER)"
 [ "$PF" = "0" ] || { echo "ABORT: probe failed"; exit 1; }

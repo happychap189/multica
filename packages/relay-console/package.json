@@ -1,0 +1,29 @@
+{
+  "name": "@multica/relay-console",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Terminal console for driving and watching an aidlc human relay.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.tsx",
+    "readonly": "tsx src/main.tsx --read-only",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "ink": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
+    "@multica/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "eslint": "^9.0.0",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

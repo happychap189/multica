@@ -1,0 +1,17 @@
+{
+  "extends": "@multica/tsconfig/base.json",
+  "compilerOptions": {
+    // DOM is unavoidable here: @multica/core exports raw TypeScript (not built
+    // declarations), and `api/client.ts` references DOM names — `BodyInit` and a
+    // guarded `typeof document` check. Type-checking those sources from a
+    // Node-only `lib` fails inside core, not in this package. The Node-only
+    // guarantee is enforced by lint instead — see `no-restricted-globals` in
+    // eslint.config.mjs.
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "noEmit": true
+  },
+  "include": ["src", "vitest.config.ts"]
+}
+

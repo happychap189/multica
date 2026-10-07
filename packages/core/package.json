@@ -149,6 +149,7 @@
     "./constants/*": "./constants/*.ts",
     "./feature-flags": "./feature-flags/index.ts",
     "./platform": "./platform/index.ts",
+    "./platform/workspace-storage": "./platform/workspace-storage.ts",
     "./drafts": "./drafts/index.ts",
     "./drafts/*": "./drafts/*.ts",
     "./shortcuts": "./shortcuts/index.ts",

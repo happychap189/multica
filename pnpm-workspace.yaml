@@ -20,6 +20,7 @@ catalog:
   clsx: ^2.1.1
   eslint-plugin-i18next: ^6.1.4
   i18next: ^26.0.8
+  ink: ^7.1.1
   jsdom: ^29.0.1
   katex: ^0.16.45
   lucide-react: ^1.0.1
@@ -35,6 +36,7 @@ catalog:
   remark-math: ^6.0.0
   tailwind-merge: ^3.4.0
   tailwindcss: ^4
+  tsx: ^4.20.0
   typescript: ^5.9.3
   unicode-animations: ^1.0.3
   vitest: ^4.1.0
